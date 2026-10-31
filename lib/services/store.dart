@@ -27,6 +27,9 @@ class RackStore extends ChangeNotifier {
   static const _kProjectsName = 'projects_name_v1';
   static const _kProfile = 'profile_v1';
   static const _kFriends = 'friends_v1';
+  static const _kProjectsOwner = 'projects_owner_v1';
+  static const _kProjectsLog = 'projects_log_v1';
+  static const _kHistorySeen = 'history_seen_v1';
 
   final _uuid = const Uuid();
 
@@ -43,6 +46,41 @@ class RackStore extends ChangeNotifier {
 
   /// Projeler askılığı bu telefonda kaldırıldı mı (proje işi olmayanlar için).
   bool projectsHidden = false;
+
+  /// Proje kodunun sahibi (profil kimliği). Sadece sahip askılığı yönetir:
+  /// adını, proje türlerini, ekip kullanıcılarını değiştirir, silinenleri geri yükler.
+  String? projectsOwner;
+
+  /// Kod yoksa (yalnız kullanım) ya da sahip belirlenmemişse herkes yönetir.
+  bool get canManageProjects =>
+      !syncing || projectsOwner == null || projectsOwner == profile.id;
+
+  /// Projeler askılığının işlem geçmişi (ekip koduyla eşitlenir).
+  List<Activity> projectsLog = [];
+
+  /// Geçmiş sekmesine en son ne zaman bakıldı (rozet için).
+  DateTime historySeenAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Diğer kullanıcıların, son bakıştan beri yaptığı işlem sayısı.
+  int get unseenActivities => activities
+      .where((a) => a.by != profile.id && a.at.isAfter(historySeenAt))
+      .length;
+
+  void markHistorySeen() {
+    historySeenAt = DateTime.now();
+    notifyListeners();
+    SharedPreferences.getInstance()
+        .then((p) => p.setString(_kHistorySeen, historySeenAt.toIso8601String()));
+  }
+
+  /// Tüm ortak askılıkların geçmişi, yeniden eskiye.
+  List<Activity> get activities {
+    final all = <Activity>[
+      if (!projectsHidden) ...projectsLog,
+      for (final b in custom) ...b.log,
+    ]..sort((a, b) => b.at.compareTo(a.at));
+    return all;
+  }
 
   /// Bu telefonun sahibinin profili (arkadaşlar bunu görür).
   Member profile = Member(id: '', name: '', color: kMemberPalette[0], emoji: '🙂');
@@ -76,7 +114,7 @@ class RackStore extends ChangeNotifier {
       boards.cast<Board?>().firstWhere((b) => b!.id == id, orElse: () => null);
 
   // Projeler askılığına kısayollar (asistan ve eski kod için)
-  List<CompanyCard> get cards => projects.cards;
+  List<CompanyCard> get cards => projects.live;
   List<CompanyCard> get active => projects.active;
   List<CompanyCard> get completed => projects.completed;
   CompanyCard addCard(String name, List<String> types, {String? assignedTo}) =>
@@ -118,6 +156,10 @@ class RackStore extends ChangeNotifier {
     boardOrder = p.getStringList(_kBoardOrder) ?? [];
     projectsHidden = p.getBool(_kProjectsHidden) ?? false;
     projects.name = p.getString(_kProjectsName) ?? projects.name;
+    projectsOwner = p.getString(_kProjectsOwner);
+    historySeenAt = DateTime.tryParse(p.getString(_kHistorySeen) ?? '') ?? historySeenAt;
+    final pl = p.getString(_kProjectsLog);
+    if (pl != null) projectsLog = _parseLog(jsonDecode(pl));
     final pr = p.getString(_kProfile);
     if (pr != null) profile = Member.fromJson(jsonDecode(pr));
     if (profile.id.isEmpty) {
@@ -182,6 +224,13 @@ class RackStore extends ChangeNotifier {
     await p.setStringList(_kBoardOrder, boardOrder);
     await p.setBool(_kProjectsHidden, projectsHidden);
     await p.setString(_kProjectsName, projects.name);
+    if (projectsOwner == null) {
+      await p.remove(_kProjectsOwner);
+    } else {
+      await p.setString(_kProjectsOwner, projectsOwner!);
+    }
+    await p.setString(
+        _kProjectsLog, jsonEncode(projectsLog.map((e) => e.toJson()).toList()));
     await p.setString(_kProfile, jsonEncode(profile.toJson()));
     await p.setString(
         _kFriends, jsonEncode(friends.values.map((e) => e.toJson()).toList()));
@@ -252,13 +301,18 @@ class RackStore extends ChangeNotifier {
     notifyListeners();
     _sub = _doc.snapshots().listen((snap) async {
       if (!snap.exists) {
-        // Kod ilk kez kullanılıyor → yereldeki veriyi buluta taşı.
-        await _doc.set(_toCloud());
+        // Kod ilk kez kullanılıyor → yereldeki veriyi buluta taşı; oluşturan sahip olur.
+        projectsOwner = profile.id;
+        await _doc.set({..._toCloud(), 'owner': profile.id, 'ownerName': profile.name});
         syncStatus = 'Eşitlendi';
         notifyListeners();
         return;
       }
       final d = snap.data()!;
+      // sahip ve geçmiş her zaman okunur (geçmiş başkasının ekleyişiyle değişir)
+      projectsOwner = d['owner'] as String?;
+      projectsLog = _parseLog(d['log']);
+      _trimLog(_doc, projectsLog, isOwner: projectsOwner == profile.id);
       // Kendi yazdığımız sürümü geri okuma; diğer telefonun yazdığını uygula.
       // Bizim gönderilmeyi bekleyen değişikliğimiz varsa onu ezme.
       final pending = _debounce?.isActive ?? false;
@@ -282,6 +336,8 @@ class RackStore extends ChangeNotifier {
   Future<void> setRackCode(String code) async {
     rackCode =
         code.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9\-_]'), '-');
+    projectsOwner = null; // yeni kodun sahibi/geçmişi buluttan gelir
+    projectsLog = [];
     await _saveLocal();
     _sub?.cancel();
     _sub = null;
@@ -316,6 +372,7 @@ class RackStore extends ChangeNotifier {
   /// kartlardaki aynı maddeler de yeniden adlandırılır.
   void updateBoard(Board b,
       {String? name, List<String>? template, Map<String, String> renames = const {}}) {
+    if (!b.canManage) return; // sadece askılık sahibi
     if (name != null && name.trim().isNotEmpty) b.name = name.trim();
     if (template != null && template.isNotEmpty) b.template = template;
     b.applyRenames(renames);
@@ -439,6 +496,7 @@ class RackStore extends ChangeNotifier {
   Board copyShared(Map<String, dynamic> data, {String? name}) {
     final b = Board.fromShare(data)..store = this;
     if (name != null) b.name = name;
+    b.cards.removeWhere((c) => c.deleted);
     custom.add(b);
     notifyListeners();
     _saveLocal();
@@ -501,6 +559,10 @@ class RackStore extends ChangeNotifier {
       b.allowCopy = d['allowCopy'] ?? false;
     }
     _absorbMembers(b, d['members']);
+    b.log = _parseLog(d['log']);
+    if (b.role == ShareRole.owner && b.shareCode != null && firebaseReady) {
+      _trimLog(_shareDoc(b.shareCode!), b.log, isOwner: true);
+    }
     notifyListeners();
   }
 
@@ -657,8 +719,9 @@ class RackStore extends ChangeNotifier {
     _pushCloud();
   }
 
-  /// Sıradaki numarayla "Kullanıcı N" ekler.
-  Member addMember() {
+  /// Sıradaki numarayla "Kullanıcı N" ekler (sadece askılık sahibi).
+  Member? addMember() {
+    if (!canManageProjects) return null;
     var n = members.length + 1;
     final names = members.map((m) => m.name).toSet();
     while (names.contains('Kullanıcı $n')) {
@@ -675,7 +738,7 @@ class RackStore extends ChangeNotifier {
 
   /// Kullanıcıyı sil. Son kullanıcı silinemez. Atandığı kartlar boşa düşer.
   bool removeMember(String id) {
-    if (members.length <= 1) return false;
+    if (!canManageProjects || members.length <= 1) return false;
     members.removeWhere((m) => m.id == id);
     for (final c in projects.cards) {
       if (c.assignedTo == id) c.assignedTo = null;
@@ -686,6 +749,7 @@ class RackStore extends ChangeNotifier {
   }
 
   void updateMember(String id, {String? name, Color? color}) {
+    if (!canManageProjects) return;
     final i = members.indexWhere((m) => m.id == id);
     if (i < 0) return;
     members[i] = Member(
@@ -694,6 +758,92 @@ class RackStore extends ChangeNotifier {
       color: color ?? members[i].color,
     );
     _membersChanged();
+  }
+
+  // ---------- işlem geçmişi ----------
+
+  static List<Activity> _parseLog(dynamic raw) => raw is List
+      ? raw
+          .whereType<Map>()
+          .map((e) => Activity.fromJson(Map<String, dynamic>.from(e)))
+          .toList()
+      : <Activity>[];
+
+  /// Ortak askılıkta yapılan işlemi geçmişe yaz (yalnız/kodsuz askılıklarda yazılmaz).
+  void logActivity(Board b, String action, CompanyCard card, String item) {
+    final shared = b.isProjects ? syncing : b.isShared;
+    if (!shared) return;
+    final a = Activity(
+      id: _uuid.v4(),
+      at: DateTime.now(),
+      by: profile.id,
+      byName: hasProfile ? profile.name : me.name,
+      byColor: (hasProfile ? profile.color : me.color).value,
+      byEmoji: hasProfile ? profile.emoji : '',
+      boardId: b.id,
+      boardName: b.name,
+      action: action,
+      cardId: card.id,
+      card: card.name,
+      item: item,
+    );
+    final list = b.isProjects ? projectsLog : b.log;
+    list.add(a);
+    if (list.length > 400) list.removeRange(0, list.length - 400);
+    if (!firebaseReady) return;
+    final doc = b.isProjects ? _doc : _shareDoc(b.shareCode!);
+    // arrayUnion: aynı anda iki kişi işlem yapsa da kayıt kaybolmaz
+    doc.update({
+      'log': FieldValue.arrayUnion([a.toJson()])
+    }).catchError((_) {});
+  }
+
+  /// Geçmiş çok uzarsa (sahip) eskileri buda.
+  void _trimLog(DocumentReference<Map<String, dynamic>> doc, List<Activity> log,
+      {required bool isOwner}) {
+    if (!isOwner || log.length <= 400) return;
+    final keep = ([...log]..sort((a, b) => a.at.compareTo(b.at)))
+        .skip(log.length - 300)
+        .map((e) => e.toJson())
+        .toList();
+    doc.update({'log': keep}).catchError((_) {});
+  }
+
+  /// Bu kayıttaki silinen kart hâlâ geri yüklenebilir mi?
+  ({Board board, CompanyCard card})? restorable(Activity a) {
+    if (a.action != 'delete') return null;
+    final b = a.boardId == Board.projectsId ? projects : boardById(a.boardId);
+    if (b == null || !b.canManage) return null;
+    final c = b.cardById(a.cardId);
+    if (c == null || !c.deleted) return null;
+    return (board: b, card: c);
+  }
+
+  /// Sahibi belli olmayan proje kodunu sahiplen (ilk basan sahip olur).
+  Future<bool> claimProjects() async {
+    if (!syncing || !firebaseReady) return false;
+    var ok = false;
+    await FirebaseFirestore.instance.runTransaction((tx) async {
+      final s = await tx.get(_doc);
+      if (s.data()?['owner'] == null) {
+        tx.update(_doc, {'owner': profile.id, 'ownerName': profile.name});
+        ok = true;
+      }
+    });
+    if (ok) {
+      projectsOwner = profile.id;
+      notifyListeners();
+      await _saveLocal();
+    }
+    return ok;
+  }
+
+  /// Sahibin adı (arkadaş listesinden ya da proje ekibinden).
+  String get projectsOwnerName {
+    final o = projectsOwner;
+    if (o == null) return '';
+    if (o == profile.id) return hasProfile ? profile.name : 'Sen';
+    return friends[o]?.name ?? 'Askılık sahibi';
   }
 
   @override

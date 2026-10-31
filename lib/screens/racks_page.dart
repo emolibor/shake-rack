@@ -41,7 +41,9 @@ class _RacksPageState extends State<RacksPage> {
               onSelect: (b) => setState(() => _selected = b.id),
               onEdit: (b) => (b.role == ShareRole.editor || b.role == ShareRole.viewer)
                   ? showSharedInfoSheet(context, store, b)
-                  : BoardEditScreen.edit(context, store, b),
+                  : (b.isProjects && !b.canManage)
+                      ? _projectsLockedSheet(context, store)
+                      : BoardEditScreen.edit(context, store, b),
               onReorder: store.reorderBoards,
               onAdd: _create,
             ),
@@ -265,4 +267,41 @@ class _Welcome extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Proje kodunun sahibi değilsen: düzenleme yerine bilgi.
+Future<void> _projectsLockedSheet(BuildContext context, RackStore store) {
+  return showModalBottomSheet(
+    context: context,
+    showDragHandle: true,
+    builder: (ctx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(store.projects.name, style: Theme.of(ctx).textTheme.titleLarge),
+            const SizedBox(height: 6),
+            Text(
+              'Bu askılığın sahibi ${store.projectsOwnerName}. Adını, proje türlerini ve '
+              'ekip kullanıcılarını sadece o değiştirebilir. Sen tik atabilir, firma '
+              'ekleyip düzenleyebilirsin.',
+              style: const TextStyle(color: Colors.black54, height: 1.35),
+            ),
+            const SizedBox(height: 16),
+            TextButton.icon(
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              onPressed: () async {
+                await store.hideProjects();
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              icon: const Icon(Icons.visibility_off_outlined),
+              label: const Text('Bu telefondan kaldır (ekibin verisi silinmez)'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }

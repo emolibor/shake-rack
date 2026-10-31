@@ -102,6 +102,10 @@ class CompanyCard {
   DateTime createdAt;
   DateTime? completedAt;
 
+  /// Geri alınabilir silme: silinen kart gizlenir, Geçmiş'ten geri yüklenir.
+  bool deleted;
+  DateTime? deletedAt;
+
   CompanyCard({
     required this.id,
     required this.name,
@@ -111,6 +115,8 @@ class CompanyCard {
     this.completed = false,
     DateTime? createdAt,
     this.completedAt,
+    this.deleted = false,
+    this.deletedAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
   List<ProjectItem> get remaining => items.where((i) => !i.done).toList();
@@ -125,6 +131,8 @@ class CompanyCard {
         'completed': completed,
         'createdAt': createdAt.toIso8601String(),
         'completedAt': completedAt?.toIso8601String(),
+        if (deleted) 'deleted': true,
+        if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
       };
   factory CompanyCard.fromJson(Map<String, dynamic> j) => CompanyCard(
         id: j['id'],
@@ -136,5 +144,93 @@ class CompanyCard {
         createdAt: DateTime.parse(j['createdAt']),
         completedAt:
             j['completedAt'] != null ? DateTime.parse(j['completedAt']) : null,
+        deleted: j['deleted'] ?? false,
+        deletedAt: j['deletedAt'] != null ? DateTime.parse(j['deletedAt']) : null,
+      );
+}
+
+/// Ortak askılıklarda yapılan bir işlem (Geçmiş sekmesi için).
+class Activity {
+  final String id;
+  final DateTime at;
+  final String by; // profil kimliği
+  final String byName;
+  final int byColor;
+  final String byEmoji;
+  final String boardId;
+  final String boardName;
+  final String action; // tick, untick, complete, reopen, add, edit, delete, restore
+  final String cardId;
+  final String card;
+  final String item;
+
+  const Activity({
+    required this.id,
+    required this.at,
+    required this.by,
+    required this.byName,
+    required this.byColor,
+    this.byEmoji = '',
+    required this.boardId,
+    required this.boardName,
+    required this.action,
+    required this.cardId,
+    required this.card,
+    this.item = '',
+  });
+
+  /// "Atilla Tekstil · Elektrik tiklendi"
+  String get text {
+    final c = card.length > 60 ? '${card.substring(0, 60)}…' : card;
+    switch (action) {
+      case 'tick':
+        return '$c · $item tiklendi';
+      case 'untick':
+        return '$c · $item tiki kaldırıldı';
+      case 'complete':
+        return '$c tamamlandı 🎉';
+      case 'reopen':
+        return '$c ipe geri asıldı';
+      case 'add':
+        return '$c eklendi';
+      case 'edit':
+        return '$c düzenlendi';
+      case 'delete':
+        return '$c silindi';
+      case 'restore':
+        return '$c geri yüklendi';
+      default:
+        return '$c · $action';
+    }
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'at': at.toIso8601String(),
+        'by': by,
+        'byName': byName,
+        'byColor': byColor,
+        'byEmoji': byEmoji,
+        'boardId': boardId,
+        'boardName': boardName,
+        'action': action,
+        'cardId': cardId,
+        'card': card,
+        'item': item,
+      };
+
+  factory Activity.fromJson(Map<String, dynamic> j) => Activity(
+        id: '${j['id'] ?? ''}',
+        at: DateTime.tryParse('${j['at']}') ?? DateTime.fromMillisecondsSinceEpoch(0),
+        by: '${j['by'] ?? ''}',
+        byName: '${j['byName'] ?? ''}',
+        byColor: (j['byColor'] as num?)?.toInt() ?? 0xFF8B6A3E,
+        byEmoji: '${j['byEmoji'] ?? ''}',
+        boardId: '${j['boardId'] ?? ''}',
+        boardName: '${j['boardName'] ?? ''}',
+        action: '${j['action'] ?? ''}',
+        cardId: '${j['cardId'] ?? ''}',
+        card: '${j['card'] ?? ''}',
+        item: '${j['item'] ?? ''}',
       );
 }

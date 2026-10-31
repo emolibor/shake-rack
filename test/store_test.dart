@@ -88,7 +88,7 @@ void main() {
 
     test('kullanıcı ekle → Kullanıcı 3, farklı renk', () {
       final store = RackStore();
-      final m = store.addMember();
+      final m = store.addMember()!;
       expect(m.name, 'Kullanıcı 3');
       expect(store.members.where((x) => x.color.value == m.color.value).length, 1);
     });
@@ -392,6 +392,98 @@ void main() {
       b.toggleItem(c, c.items.single);
       expect(c.items.single.doneBy, 'p-guest');
       expect(guest.memberById('p-guest')!.color, const Color(0xFF9B4DE0));
+    });
+  });
+
+  group('Sahiplik, geri alınabilir silme, geçmiş', () {
+    Board ownedShared(RackStore s) {
+      final b = s.addBoard('Reels', ['Instagram']);
+      b.shareCode = 'K7P2QX9M';
+      b.role = ShareRole.owner;
+      return b;
+    }
+
+    test('paylaşılmayan askılıkta silme kalıcıdır, geçmiş yazılmaz', () {
+      final s = RackStore();
+      final c = s.addCard('Atilla', ['Mimari Proje']);
+      s.projects.deleteCard(c);
+      expect(s.projects.cards, isEmpty);
+      expect(s.activities, isEmpty);
+    });
+
+    test('ortak askılıkta silinen kart gizlenir ve sahip geri yükler', () {
+      final s = RackStore()
+        ..profile = const Member(id: 'p-me', name: 'Emirhan', color: Color(0xFF2E7DE0));
+      final b = ownedShared(s);
+      final c = b.addCard('Video 1', b.template);
+      b.deleteCard(c);
+      expect(b.cards, contains(c)); // veride duruyor
+      expect(b.active, isEmpty); // ama ipte yok
+      final del = s.activities.firstWhere((a) => a.action == 'delete');
+      expect(del.text, 'Video 1 silindi');
+      expect(del.byName, 'Emirhan');
+      final r = s.restorable(del)!;
+      expect(r.card, same(c));
+      expect(r.board.restoreCard(r.card), isTrue);
+      expect(b.active.single.name, 'Video 1');
+      expect(s.activities.any((a) => a.action == 'restore'), isTrue);
+      expect(s.restorable(del), isNull); // artık geri yüklenecek bir şey yok
+    });
+
+    test('düzenleyici askılık ayarlarını değiştiremez, silineni geri yükleyemez', () {
+      final guest = RackStore()
+        ..profile = const Member(id: 'p-guest', name: 'Mert', color: Color(0xFF14A3A3));
+      final src = Board.custom('Reels', ['Instagram']);
+      final b = guest.joinShared({
+        ...src.sharePayload(),
+        'permission': 'edit',
+        'code': 'ABCD2345',
+        'members': {'p-owner': {'name': 'Emirhan', 'role': 'owner', 'color': 0xFF2E7DE0}},
+      });
+      expect(b.canEdit, isTrue);
+      expect(b.canManage, isFalse);
+      guest.updateBoard(b, name: 'Benim artık', template: ['TikTok']);
+      expect(b.name, 'Reels');
+      expect(b.template, ['Instagram']);
+
+      final c = b.addCard('Video', b.template);
+      b.deleteCard(c);
+      expect(b.active, isEmpty);
+      final del = guest.activities.firstWhere((a) => a.action == 'delete');
+      expect(guest.restorable(del), isNull);
+      expect(b.restoreCard(c), isFalse);
+      expect(b.purgeCard(c), isFalse);
+    });
+
+    test('işlem metinleri ve diğer kullanıcı rozeti', () {
+      final s = RackStore()
+        ..profile = const Member(id: 'p-me', name: 'Emirhan', color: Color(0xFF2E7DE0));
+      final b = ownedShared(s);
+      final c = b.addCard('Atilla Tekstil', ['Elektrik Projesi']);
+      b.toggleItem(c, c.items.single);
+      expect(s.activities.firstWhere((a) => a.action == 'tick').text,
+          'Atilla Tekstil · Elektrik tiklendi');
+      expect(s.unseenActivities, 0); // kendi işlemlerim sayılmaz
+
+      // diğer telefondan gelen geçmiş
+      s.applySharedSnapshot(b, {
+        ...b.sharePayload(),
+        'updatedBy': 'baska',
+        'members': {'p-ayse': {'name': 'Ayşe', 'role': 'editor', 'color': 0xFFE02E7D}},
+        'log': [
+          ...b.log.map((e) => e.toJson()),
+          Activity(
+            id: 'x1', at: DateTime.now(), by: 'p-ayse', byName: 'Ayşe',
+            byColor: 0xFFE02E7D, boardId: b.id, boardName: 'Reels',
+            action: 'complete', cardId: c.id, card: 'Atilla Tekstil',
+          ).toJson(),
+        ],
+      });
+      expect(s.activities.firstWhere((a) => a.by == 'p-ayse').text,
+          'Atilla Tekstil tamamlandı 🎉');
+      expect(s.unseenActivities, 1);
+      s.markHistorySeen();
+      expect(s.unseenActivities, 0);
     });
   });
 }

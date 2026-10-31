@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'firebase_options.dart';
 import 'screens/chat_screen.dart';
 import 'screens/completed_screen.dart';
+import 'screens/history_screen.dart';
 import 'screens/racks_page.dart';
 import 'screens/team_screen.dart';
 import 'services/store.dart';
@@ -80,10 +81,11 @@ class _HomeState extends State<_Home> {
     final pages = [
       RacksPage(store: store),
       CompletedScreen(store: store),
+      HistoryScreen(store: store),
       ChatScreen(store: store),
       TeamScreen(store: store),
     ];
-    const titles = ['Askılık', 'Tamamlananlar', 'Mesaj', 'Profil'];
+    const titles = ['Askılık', 'Tamamlananlar', 'Geçmiş', 'Mesaj', 'Profil'];
 
     return Scaffold(
       appBar: AppBar(
@@ -138,7 +140,10 @@ class _HomeState extends State<_Home> {
       body: IndexedStack(index: _tab, children: pages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        onDestinationSelected: (i) {
+          if (_tab == 2 || i == 2) store.markHistorySeen();
+          setState(() => _tab = i);
+        },
         destinations: [
           const NavigationDestination(icon: Icon(Icons.checkroom), label: 'Askılık'),
           NavigationDestination(
@@ -151,6 +156,17 @@ class _HomeState extends State<_Home> {
               ),
             ),
             label: 'Tamamlanan',
+          ),
+          NavigationDestination(
+            icon: AnimatedBuilder(
+              animation: store,
+              builder: (_, __) => Badge(
+                isLabelVisible: _tab != 2 && store.unseenActivities > 0,
+                label: Text('${store.unseenActivities}'),
+                child: const Icon(Icons.history),
+              ),
+            ),
+            label: 'Geçmiş',
           ),
           const NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: 'Mesaj'),
           const NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profil'),

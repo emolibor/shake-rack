@@ -44,6 +44,14 @@ class Board {
   /// Paylaşılan askılıktaki kişiler: profil kimliği → rol (owner/editor/viewer).
   Map<String, String> people = {};
 
+  /// Paylaşılan özel askılığın işlem geçmişi (Projeler'inki store'da).
+  List<Activity> log = [];
+
+  /// Askılığı yönetebilir mi: silmek, adını / maddelerini değiştirmek,
+  /// silinen kartı geri yüklemek. Ortak askılıkta sadece sahip.
+  bool get canManage =>
+      isProjects ? store.canManageProjects : (role == null || role == ShareRole.owner);
+
   bool get isShared => shareCode != null;
   bool get canEdit => role != ShareRole.viewer;
   bool get isOwnerOrLocal => role == null || role == ShareRole.owner;
@@ -87,8 +95,12 @@ class Board {
   String get cardTitleLabel => isProjects ? 'Firma adı' : 'Başlık';
   String get itemsLabel => isProjects ? 'Çizilecek projeler' : 'Maddeler';
 
-  List<CompanyCard> get active => cards.where((c) => !c.completed).toList();
-  List<CompanyCard> get completed => cards.where((c) => c.completed).toList()
+  /// Silinmemiş kartlar.
+  List<CompanyCard> get live => cards.where((c) => !c.deleted).toList();
+  List<CompanyCard> get active =>
+      cards.where((c) => !c.completed && !c.deleted).toList();
+  List<CompanyCard> get completed =>
+      cards.where((c) => c.completed && !c.deleted).toList()
     ..sort((a, b) =>
         (b.completedAt ?? b.createdAt).compareTo(a.completedAt ?? a.createdAt));
 
@@ -96,6 +108,13 @@ class Board {
     if (!canEdit) return; // sadece inceleme: hiçbir değişiklik kaydedilmez
     store.boardChanged(this);
   }
+
+  void _log(String action, CompanyCard card, [String item = '']) {
+    if (!canEdit) return;
+    store.logActivity(this, action, card, item);
+  }
+
+  static String _short(String t) => kShortNames[t] ?? t;
 
   // ---------- kartlar ----------
   CompanyCard addCard(String name, List<String> types,
@@ -108,6 +127,7 @@ class Board {
       notes: notes,
     );
     cards.add(card);
+    _log('add', card);
     _commit();
     return card;
   }
@@ -130,13 +150,45 @@ class Board {
       final old = {for (final i in card.items) i.type: i};
       card.items = types.map((t) => old[t] ?? ProjectItem(type: t)).toList();
     }
+    _log('edit', card);
     _commit();
   }
 
+  /// Geri alınabilir silme: kart gizlenir, Geçmiş'ten geri yüklenebilir.
   void deleteCard(CompanyCard card) {
-    cards.remove(card);
+    // kimseyle paylaşılmayan askılıkta kalıcı sil (geri yükleyecek geçmiş yok)
+    final sharedBoard = isProjects ? store.syncing : isShared;
+    if (!sharedBoard) {
+      cards.remove(card);
+      _commit();
+      return;
+    }
+    card.deleted = true;
+    card.deletedAt = DateTime.now();
+    _log('delete', card);
     _commit();
   }
+
+  /// Silinen kartı geri getir (askılığı yöneten kişi).
+  bool restoreCard(CompanyCard card) {
+    if (!canManage || !card.deleted) return false;
+    card.deleted = false;
+    card.deletedAt = null;
+    _log('restore', card);
+    _commit();
+    return true;
+  }
+
+  /// Silinen kartı kalıcı olarak kaldır (askılığı yöneten kişi).
+  bool purgeCard(CompanyCard card) {
+    if (!canManage || !card.deleted) return false;
+    cards.remove(card);
+    _commit();
+    return true;
+  }
+
+  CompanyCard? cardById(String id) =>
+      cards.cast<CompanyCard?>().firstWhere((c) => c!.id == id, orElse: () => null);
 
   /// Aktif kartlar arasında sırayı değiştir (öncelik).
   void reorderActive(int oldIndex, int newIndex) {
@@ -144,8 +196,8 @@ class Board {
     if (newIndex > oldIndex) newIndex -= 1;
     final moved = act.removeAt(oldIndex);
     act.insert(newIndex, moved);
-    final done = cards.where((c) => c.completed).toList();
-    cards = [...act, ...done];
+    final rest = cards.where((c) => c.completed || c.deleted).toList();
+    cards = [...act, ...rest];
     _commit();
   }
 
@@ -162,6 +214,7 @@ class Board {
       item.doneBy = null;
       item.doneAt = null;
     }
+    _log(item.done ? 'tick' : 'untick', card, _short(item.type));
     final finished = card.allDone;
     _commit();
     return finished;
@@ -172,6 +225,7 @@ class Board {
   bool toggleNote(CompanyCard card) {
     card.completed = !card.completed;
     card.completedAt = card.completed ? DateTime.now() : null;
+    _log(card.completed ? 'complete' : 'reopen', card);
     _commit();
     return card.completed;
   }
@@ -191,12 +245,14 @@ class Board {
   void markCompleted(CompanyCard card) {
     card.completed = true;
     card.completedAt = DateTime.now();
+    _log('complete', card);
     _commit();
   }
 
   void reopen(CompanyCard card) {
     card.completed = false;
     card.completedAt = null;
+    _log('reopen', card);
     _commit();
   }
 
@@ -213,6 +269,7 @@ class Board {
         'allowCopy': allowCopy,
         'shareEnded': shareEnded,
         'people': people,
+        'log': log.map((e) => e.toJson()).toList(),
       };
 
   /// Buluttaki paylaşım belgesine giden içerik.
@@ -261,5 +318,8 @@ class Board {
         ..shareCanEdit = j['shareCanEdit'] ?? true
         ..allowCopy = j['allowCopy'] ?? true
         ..shareEnded = j['shareEnded'] ?? false
-        ..people = Map<String, String>.from(j['people'] ?? const {});
+        ..people = Map<String, String>.from(j['people'] ?? const {})
+        ..log = (j['log'] as List? ?? [])
+            .map((e) => Activity.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
 }

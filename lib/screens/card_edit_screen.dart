@@ -101,9 +101,12 @@ class _CardEditScreenState extends State<CardEditScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: Text(board.isNotes ? 'Notu sil?' : 'Kartı sil?'),
-        content: Text(board.isNotes
-            ? 'Bu not ipten alınacak.'
-            : '${widget.card!.name} ipten alınacak.'),
+        content: Text((board.isNotes
+                ? 'Bu not ipten alınacak.'
+                : '${widget.card!.name} ipten alınacak.') +
+            ((board.isShared || (board.isProjects && widget.store.syncing))
+                ? '\n\nAskılık sahibi Geçmiş sekmesinden geri yükleyebilir.'
+                : '')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),

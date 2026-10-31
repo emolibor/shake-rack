@@ -104,6 +104,7 @@ class TeamScreen extends StatelessWidget {
           if (!store.projectsHidden) ...[
           const SizedBox(height: 22),
           _section('Proje ekibi (${store.projects.name})', Icons.groups_outlined),
+          _OwnerRow(store: store),
           const Padding(
             padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
             child: Text(
@@ -119,15 +120,19 @@ class TeamScreen extends StatelessWidget {
                   title: Text(m.name),
                   secondary: IconButton(
                     icon: CircleAvatar(backgroundColor: m.color, radius: 14,
-                        child: const Icon(Icons.edit, size: 14, color: Colors.white)),
-                    onPressed: () => _edit(context, m.id),
+                        child: Icon(
+                            store.canManageProjects ? Icons.edit : Icons.lock_outline,
+                            size: 14, color: Colors.white)),
+                    onPressed: store.canManageProjects ? () => _edit(context, m.id) : null,
                   ),
                 ),
               )),
           const SizedBox(height: 4),
+          if (store.canManageProjects)
           OutlinedButton.icon(
             onPressed: () {
               final m = store.addMember();
+              if (m == null) return;
               ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('${m.name} eklendi')));
             },
@@ -388,6 +393,56 @@ class _FriendsList extends StatelessWidget {
               onTap: () => showFriendSheet(context, store, f),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Proje kodunun sahibi: göster ya da (sahipsizse) sahiplen.
+class _OwnerRow extends StatelessWidget {
+  final RackStore store;
+  const _OwnerRow({required this.store});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!store.syncing) return const SizedBox.shrink();
+    final owner = store.projectsOwner;
+    final mine = owner == store.profile.id;
+    return Card(
+      color: mine ? const Color(0xFFE2F3E5) : const Color(0xFFFFF8E7),
+      child: ListTile(
+        leading: Icon(owner == null
+            ? Icons.shield_outlined
+            : mine
+                ? Icons.verified_user
+                : Icons.lock_outline),
+        title: Text(owner == null
+            ? 'Bu askılığın sahibi yok'
+            : mine
+                ? 'Askılığın sahibi sensin'
+                : 'Sahibi: ${store.projectsOwnerName}'),
+        subtitle: Text(owner == null
+            ? 'Şu an koda bağlı herkes her şeyi değiştirebilir. Sahiplenince adı, proje türlerini '
+                've kullanıcıları sadece sen değiştirirsin; silinen firmaları geri yüklersin.'
+            : mine
+                ? 'Diğerleri tik atar, firma ekler; askılığın ayarlarını sadece sen değiştirirsin.'
+                : 'Tik atabilir, firma ekleyip düzenleyebilirsin; ayarları sadece sahip değiştirir.'),
+        isThreeLine: true,
+        trailing: owner == null
+            ? FilledButton(
+                onPressed: () async {
+                  if (!await ensureProfile(context, store)) return;
+                  final ok = await store.claimProjects();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(ok
+                            ? 'Artık askılığın sahibi sensin 🔒'
+                            : 'Başka biri az önce sahiplendi.')));
+                  }
+                },
+                child: const Text('Sahibi benim'),
+              )
+            : null,
       ),
     );
   }
