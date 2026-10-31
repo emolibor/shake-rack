@@ -63,7 +63,7 @@ jobs:
       - run: flutter pub get
 
       - name: Testler (mesaj ekranı soruları)
-        run: flutter test --reporter expanded
+        run: flutter test --reporter github
 
       - name: Uygulama ikonu
         run: dart run flutter_launcher_icons
