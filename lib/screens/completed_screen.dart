@@ -25,11 +25,16 @@ class _CompletedScreenState extends State<CompletedScreen> {
     return AnimatedBuilder(
       animation: store,
       builder: (context, _) {
-        final board = store.boardById(_selected) ?? store.projects;
+        final all = store.boards;
+        if (all.isEmpty) {
+          return const Center(
+              child: Text('Henüz askılık yok.', style: TextStyle(color: Colors.black54)));
+        }
+        final board = store.boardById(_selected) ?? all.first;
         final done = board.completed;
         return Column(
           children: [
-            if (store.custom.isNotEmpty)
+            if (all.length > 1)
               SizedBox(
                 height: 52,
                 child: ListView(

@@ -41,6 +41,9 @@ class Board {
   /// Paylaşan kişi paylaşımı kapattı → bu artık yerel kopya (bilgi bandı için).
   bool shareEnded = false;
 
+  /// Paylaşılan askılıktaki kişiler: profil kimliği → rol (owner/editor/viewer).
+  Map<String, String> people = {};
+
   bool get isShared => shareCode != null;
   bool get canEdit => role != ShareRole.viewer;
   bool get isOwnerOrLocal => role == null || role == ShareRole.owner;
@@ -150,7 +153,10 @@ class Board {
   bool toggleItem(CompanyCard card, ProjectItem item) {
     item.done = !item.done;
     if (item.done) {
-      item.doneBy = store.currentMemberId;
+      // paylaşılan askılıkta tiki profil kimliğiyle işaretle (rengi herkeste doğru çıksın)
+      item.doneBy = isShared && store.profile.id.isNotEmpty
+          ? store.profile.id
+          : store.currentMemberId;
       item.doneAt = DateTime.now();
     } else {
       item.doneBy = null;
@@ -206,6 +212,7 @@ class Board {
         'shareCanEdit': shareCanEdit,
         'allowCopy': allowCopy,
         'shareEnded': shareEnded,
+        'people': people,
       };
 
   /// Buluttaki paylaşım belgesine giden içerik.
@@ -253,5 +260,6 @@ class Board {
             .firstWhere((r) => r!.name == j['role'], orElse: () => null)
         ..shareCanEdit = j['shareCanEdit'] ?? true
         ..allowCopy = j['allowCopy'] ?? true
-        ..shareEnded = j['shareEnded'] ?? false;
+        ..shareEnded = j['shareEnded'] ?? false
+        ..people = Map<String, String>.from(j['people'] ?? const {});
 }

@@ -23,6 +23,10 @@ class RackStore extends ChangeNotifier {
   static const _kCurrent = 'current_member_v1';
   static const _kRackCode = 'rack_code_v1';
   static const _kDeviceId = 'device_id_v1';
+  static const _kProjectsHidden = 'projects_hidden_v1';
+  static const _kProjectsName = 'projects_name_v1';
+  static const _kProfile = 'profile_v1';
+  static const _kFriends = 'friends_v1';
 
   final _uuid = const Uuid();
 
@@ -37,9 +41,19 @@ class RackStore extends ChangeNotifier {
   /// Sekme sırası (id listesi). Listede olmayanlar sona eklenir.
   List<String> boardOrder = [];
 
+  /// Projeler askılığı bu telefonda kaldırıldı mı (proje işi olmayanlar için).
+  bool projectsHidden = false;
+
+  /// Bu telefonun sahibinin profili (arkadaşlar bunu görür).
+  Member profile = Member(id: '', name: '', color: kMemberPalette[0], emoji: '🙂');
+  bool get hasProfile => profile.name.trim().isNotEmpty;
+
+  /// Askılık paylaştığın / askılığına katıldığın kişiler.
+  Map<String, Member> friends = {};
+
   /// Sekmeler, kullanıcının sürükleyerek verdiği sırayla.
   List<Board> get boards {
-    final all = [projects, ...custom];
+    final all = [if (!projectsHidden) projects, ...custom];
     final rank = <String, int>{
       for (var k = 0; k < all.length; k++)
         all[k].id: boardOrder.contains(all[k].id)
@@ -82,9 +96,15 @@ class RackStore extends ChangeNotifier {
 
   Member get me => members.firstWhere((m) => m.id == currentMemberId,
       orElse: () => members.first);
-  Member? memberById(String? id) => id == null
-      ? null
-      : members.cast<Member?>().firstWhere((m) => m!.id == id, orElse: () => null);
+  /// Proje ekibi üyesi, kendi profilin ya da bir arkadaş.
+  Member? memberById(String? id) {
+    if (id == null) return null;
+    for (final m in members) {
+      if (m.id == id) return m;
+    }
+    if (id == profile.id) return profile;
+    return friends[id];
+  }
 
   // ---------- yükleme / kayıt ----------
 
@@ -96,6 +116,21 @@ class RackStore extends ChangeNotifier {
           (jsonDecode(c) as List).map((e) => CompanyCard.fromJson(e)).toList();
     }
     boardOrder = p.getStringList(_kBoardOrder) ?? [];
+    projectsHidden = p.getBool(_kProjectsHidden) ?? false;
+    projects.name = p.getString(_kProjectsName) ?? projects.name;
+    final pr = p.getString(_kProfile);
+    if (pr != null) profile = Member.fromJson(jsonDecode(pr));
+    if (profile.id.isEmpty) {
+      profile = Member(id: _uuid.v4(), name: '', color: profile.color, emoji: profile.emoji);
+      await p.setString(_kProfile, jsonEncode(profile.toJson()));
+    }
+    final fr = p.getString(_kFriends);
+    if (fr != null) {
+      friends = {
+        for (final e in jsonDecode(fr) as List)
+          (e['id'] as String): Member.fromJson(Map<String, dynamic>.from(e))
+      };
+    }
     final pt = p.getStringList(_kProjectTypes);
     if (pt != null && pt.isNotEmpty) projects.template = pt;
     final cb = p.getString(_kCustom);
@@ -123,6 +158,7 @@ class RackStore extends ChangeNotifier {
     for (final b in custom) {
       if (b.isShared) _listenShared(b);
     }
+    _listenProfile();
   }
 
   /// "Ben"/"Arkadaşım" gibi eski varsayılan adları "Kullanıcı 1/2" yap.
@@ -144,6 +180,11 @@ class RackStore extends ChangeNotifier {
         _kCards, jsonEncode(projects.cards.map((e) => e.toJson()).toList()));
     await p.setStringList(_kProjectTypes, projects.template);
     await p.setStringList(_kBoardOrder, boardOrder);
+    await p.setBool(_kProjectsHidden, projectsHidden);
+    await p.setString(_kProjectsName, projects.name);
+    await p.setString(_kProfile, jsonEncode(profile.toJson()));
+    await p.setString(
+        _kFriends, jsonEncode(friends.values.map((e) => e.toJson()).toList()));
     await p.setString(
         _kCustom, jsonEncode(custom.map((e) => e.toJson()).toList()));
     await p.setString(
@@ -157,6 +198,7 @@ class RackStore extends ChangeNotifier {
         'cards': projects.cards.map((e) => e.toJson()).toList(),
         'members': members.map((e) => e.toJson()).toList(),
         'projectTypes': projects.template,
+        'projectsName': projects.name,
       };
 
   Map<String, dynamic> _toCloud() => {
@@ -170,6 +212,8 @@ class RackStore extends ChangeNotifier {
     projects.cards = (d['cards'] as List? ?? [])
         .map((e) => CompanyCard.fromJson(Map<String, dynamic>.from(e)))
         .toList();
+    final pn = d['projectsName'] as String?;
+    if (pn != null && pn.trim().isNotEmpty) projects.name = pn;
     final pt = d['projectTypes'] as List?;
     if (pt != null && pt.isNotEmpty) {
       projects.template = pt.map((e) => e.toString()).toList();
@@ -272,9 +316,7 @@ class RackStore extends ChangeNotifier {
   /// kartlardaki aynı maddeler de yeniden adlandırılır.
   void updateBoard(Board b,
       {String? name, List<String>? template, Map<String, String> renames = const {}}) {
-    if (!b.isProjects && name != null && name.trim().isNotEmpty) {
-      b.name = name.trim();
-    }
+    if (name != null && name.trim().isNotEmpty) b.name = name.trim();
     if (template != null && template.isNotEmpty) b.template = template;
     b.applyRenames(renames);
     boardChanged(b);
@@ -283,8 +325,9 @@ class RackStore extends ChangeNotifier {
   /// Askılığı sil. Paylaşan sahipse paylaşım da kapanır; alıcıysa sadece
   /// kendi telefonundan çıkar.
   Future<void> deleteBoard(Board b) async {
-    if (b.isProjects) return;
+    if (b.isProjects) return hideProjects();
     if (b.isShared && b.role == ShareRole.owner) await stopSharing(b);
+    if (b.isShared && b.role != ShareRole.owner) await _leaveMembers(b);
     _unlistenShared(b);
     custom.remove(b);
     boardOrder.remove(b.id);
@@ -329,11 +372,13 @@ class RackStore extends ChangeNotifier {
       ...b.sharePayload(),
       'permission': canEdit ? 'edit' : 'view',
       'allowCopy': allowCopy,
-      'owner': deviceId,
-      'ownerName': me.name,
+      'owner': profile.id,
+      'ownerName': hasProfile ? profile.name : me.name,
+      'members': {profile.id: _meEntry(ShareRole.owner)},
       'updatedBy': deviceId,
       'updatedAt': FieldValue.serverTimestamp(),
-    });
+    }, SetOptions(merge: true)); // merge: katılanların üye kaydı silinmesin
+    b.people[profile.id] = ShareRole.owner.name;
     _listenShared(b);
     notifyListeners();
     await _saveLocal();
@@ -377,6 +422,13 @@ class RackStore extends ChangeNotifier {
     b.role = b.shareCanEdit ? ShareRole.editor : ShareRole.viewer;
     b.allowCopy = data['allowCopy'] ?? false;
     custom.add(b);
+    _absorbMembers(b, data['members']);
+    b.people[profile.id] = b.role!.name;
+    if (firebaseReady) {
+      _shareDoc(code)
+          .set({'members': {profile.id: _meEntry(b.role!)}}, SetOptions(merge: true))
+          .catchError((_) {});
+    }
     _listenShared(b);
     notifyListeners();
     _saveLocal();
@@ -434,17 +486,162 @@ class RackStore extends ChangeNotifier {
         }
         return;
       }
-      final d = snap.data()!;
       final pending = _shareTimers[b.id]?.isActive ?? false;
-      if (d['updatedBy'] != deviceId && !pending) b.applyShared(d);
-      if (b.role != ShareRole.owner) {
-        b.shareCanEdit = d['permission'] != 'view';
-        b.role = b.shareCanEdit ? ShareRole.editor : ShareRole.viewer;
-        b.allowCopy = d['allowCopy'] ?? false;
-      }
-      notifyListeners();
+      applySharedSnapshot(b, snap.data()!, pending: pending);
       await _saveLocal();
     });
+  }
+
+  /// Paylaşım belgesindeki son durumu askılığa uygula: içerik, izinler, üyeler.
+  void applySharedSnapshot(Board b, Map<String, dynamic> d, {bool pending = false}) {
+    if (d['updatedBy'] != deviceId && !pending) b.applyShared(d);
+    if (b.role != ShareRole.owner) {
+      b.shareCanEdit = d['permission'] != 'view';
+      b.role = b.shareCanEdit ? ShareRole.editor : ShareRole.viewer;
+      b.allowCopy = d['allowCopy'] ?? false;
+    }
+    _absorbMembers(b, d['members']);
+    notifyListeners();
+  }
+
+  /// Belgedeki üyeleri askılığa yaz; kendin dışındakileri arkadaş listesine ekle.
+  void _absorbMembers(Board b, dynamic raw) {
+    if (raw is! Map) return;
+    final people = <String, String>{};
+    raw.forEach((id, v) {
+      if (v is! Map) return;
+      people['$id'] = '${v['role'] ?? 'editor'}';
+      if (id == profile.id) return;
+      friends['$id'] = Member(
+        id: '$id',
+        name: '${v['name'] ?? ''}',
+        color: Color((v['color'] as num?)?.toInt() ?? 0xFF8B6A3E),
+        emoji: '${v['emoji'] ?? ''}',
+      );
+    });
+    b.people = people;
+  }
+
+  Map<String, dynamic> _meEntry(ShareRole role) => {
+        'name': profile.name,
+        'color': profile.color.value,
+        'emoji': profile.emoji,
+        'role': role.name,
+      };
+
+  /// Alıcı askılıktan ayrılınca üye listesinden çıkar.
+  Future<void> _leaveMembers(Board b) async {
+    if (!firebaseReady || b.shareCode == null) return;
+    try {
+      await _shareDoc(b.shareCode!).update({'members.${profile.id}': FieldValue.delete()});
+    } catch (_) {}
+  }
+
+  // ---------- Projeler askılığı (isteğe bağlı) ----------
+
+  /// Projeler askılığını bu telefondan kaldır. Ekip koduna bağlı değilse
+  /// içeriği de temizlenir; bağlıysa ekibin verisine dokunulmaz.
+  Future<void> hideProjects() async {
+    projectsHidden = true;
+    if (!syncing) {
+      projects.cards = [];
+      projects.template = List.of(kProjectTypes);
+      projects.name = 'Projeler';
+    }
+    boardOrder.remove(projects.id);
+    notifyListeners();
+    await _saveLocal();
+  }
+
+  /// Projeler askılığını geri ekle.
+  Board showProjects() {
+    projectsHidden = false;
+    notifyListeners();
+    _saveLocal();
+    return projects;
+  }
+
+  // ---------- profil ve arkadaşlar ----------
+
+  DocumentReference<Map<String, dynamic>> _profileDoc(String id) =>
+      FirebaseFirestore.instance.collection('racks').doc('user_$id');
+  StreamSubscription? _profileSub;
+  final Set<String> _joiningInvites = {};
+
+  Future<void> updateProfile({String? name, Color? color, String? emoji}) async {
+    profile = profile.copyWith(name: name?.trim(), color: color, emoji: emoji);
+    notifyListeners();
+    await _saveLocal();
+    if (!firebaseReady || !hasProfile) return;
+    try {
+      await _profileDoc(profile.id).set({
+        'name': profile.name,
+        'color': profile.color.value,
+        'emoji': profile.emoji,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      // paylaşılan askılıklardaki kendi kaydını da güncelle
+      for (final b in custom.where((b) => b.isShared)) {
+        final role = b.role ?? ShareRole.editor;
+        await _shareDoc(b.shareCode!)
+            .set({'members': {profile.id: _meEntry(role)}}, SetOptions(merge: true));
+      }
+    } catch (_) {}
+  }
+
+  /// Kendi profil belgemi dinle: arkadaşların gönderdiği ortak askılık
+  /// davetleri buraya düşer ve otomatik katılınır.
+  void _listenProfile() {
+    if (!firebaseReady || profile.id.isEmpty) return;
+    _profileSub?.cancel();
+    _profileSub = _profileDoc(profile.id).snapshots().listen((snap) async {
+      final inbox = (snap.data()?['inbox'] as List?) ?? const [];
+      for (final inv in inbox) {
+        if (inv is! Map) continue;
+        final code = '${inv['code'] ?? ''}';
+        if (code.isEmpty || _joiningInvites.contains(code)) continue;
+        _joiningInvites.add(code);
+        try {
+          final already = custom.any((b) => b.shareCode == code);
+          if (!already) {
+            final data = await fetchShared(code);
+            if (data != null) joinShared(data);
+          }
+          await _profileDoc(profile.id)
+              .update({'inbox': FieldValue.arrayRemove([inv])});
+        } catch (_) {
+        } finally {
+          _joiningInvites.remove(code);
+        }
+      }
+    }, onError: (_) {});
+  }
+
+  /// Arkadaşla ortak askılık: gerekirse paylaşır, arkadaşın gelen kutusuna
+  /// davet bırakır. Arkadaşın uygulaması açıkken askılık onda kendiliğinden belirir.
+  Future<void> inviteFriend(Board b, Member friend) async {
+    if (!firebaseReady) throw StateError('İnternet / Firebase bağlantısı yok.');
+    if (!b.isShared) await shareBoard(b, canEdit: true, allowCopy: true);
+    await _profileDoc(friend.id).set({
+      'inbox': FieldValue.arrayUnion([
+        {
+          'code': b.shareCode,
+          'from': profile.id,
+          'fromName': profile.name,
+          'board': b.name,
+        }
+      ]),
+    }, SetOptions(merge: true));
+  }
+
+  /// Bu arkadaşla ortak olan askılıklar.
+  List<Board> boardsWith(String friendId) =>
+      custom.where((b) => b.people.containsKey(friendId)).toList();
+
+  void removeFriend(String id) {
+    friends.remove(id);
+    notifyListeners();
+    _saveLocal();
   }
 
   // ---------- ekip ----------
@@ -501,6 +698,7 @@ class RackStore extends ChangeNotifier {
 
   @override
   void dispose() {
+    _profileSub?.cancel();
     for (final s in _shareSubs.values) {
       s.cancel();
     }

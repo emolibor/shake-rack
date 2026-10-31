@@ -100,7 +100,7 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
 
   void _save() {
-    if (!_isProjects && _name.text.trim().isEmpty) {
+    if (_name.text.trim().isEmpty) {
       _snack('Askılığa bir ad ver.');
       return;
     }
@@ -125,12 +125,23 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
 
   Future<void> _delete() async {
     final b = widget.board!;
+    final synced = widget.store.syncing;
+    final String body;
+    if (b.isProjects) {
+      body = synced
+          ? 'Bu telefondan kaldırılır. Ekip koduna bağlı olduğun için ekibin '
+              'proje verisi silinmez; istersen + Yeni → "Ekip projeleri" ile geri eklersin.'
+          : 'İçindeki ${b.cards.length} kart silinir. İstersen sonra + Yeni → '
+              '"Ekip projeleri" ile boş olarak geri eklersin.';
+    } else {
+      body = 'İçindeki ${b.cards.length} ${b.isNotes ? 'not' : 'kart'} da silinecek. Geri alınamaz.'
+          '${b.isShared ? '\n\nPaylaşım da kapanır; paylaştığın kişilerde kendi kopyası olarak kalır.' : ''}';
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: Text('"${b.name}" askılığını sil?'),
-        content: Text('İçindeki ${b.cards.length} ${b.isNotes ? 'not' : 'kart'} da silinecek. Geri alınamaz.'
-            '${b.isShared ? '\n\nPaylaşım da kapanır; paylaştığın kişilerde kendi kopyası olarak kalır.' : ''}'),
+        content: Text(body),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Vazgeç')),
           FilledButton(
@@ -163,11 +174,7 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = _isNew
-        ? 'Yeni Askılık'
-        : _isProjects
-            ? 'Proje Türlerini Düzenle'
-            : 'Askılığı Düzenle';
+    final title = _isNew ? 'Yeni Askılık' : 'Askılığı Düzenle';
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
@@ -181,7 +188,7 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
                 if (mounted) setState(() {});
               },
             ),
-          if (!_isNew && !_isProjects)
+          if (!_isNew)
             IconButton(icon: const Icon(Icons.delete_outline), onPressed: _delete),
         ],
       ),
@@ -190,8 +197,9 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
         children: [
           _isProjects
               ? _info(Icons.groups_outlined,
-                  'Projeler askılığı grupla paylaşılır; buradaki değişiklik herkeste görünür. '
-                  'Bir maddenin adını değiştirirsen mevcut kartlardaki adı da değişir, tikler korunur.')
+                  'Ekip projeleri askılığı: ekip koduna bağlıysan adı ve maddeleri ekipte herkeste değişir. '
+                  'Bir maddenin adını değiştirirsen mevcut kartlardaki adı da değişir, tikler korunur. '
+                  'Proje işin yoksa sağ üstten silebilirsin.')
               : (widget.board?.isShared ?? false)
                   ? _info(Icons.people_alt_outlined,
                       'Bu askılık ${widget.board!.shareCodePretty} koduyla paylaşılıyor. '
@@ -200,6 +208,21 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
                       'Özel askılık sadece bu telefonda tutulur. Sağ üstteki paylaş '
                       'simgesiyle istediğin kişiyle paylaşabilirsin.'),
           const SizedBox(height: 16),
+          if (_isNew && widget.store.projectsHidden) ...[
+            Card(
+              margin: EdgeInsets.zero,
+              color: const Color(0xFFFFF8E7),
+              child: ListTile(
+                leading: const Icon(Icons.groups_outlined),
+                title: const Text('Ekip projeleri'),
+                subtitle: const Text(
+                    'Firma/proje takibi: proje türleri, kişi ataması, ekip kodu ve sohbetten liste.'),
+                trailing: const Icon(Icons.add),
+                onTap: () => Navigator.pop(context, widget.store.showProjects()),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           if (_isNew) ...[
             OutlinedButton.icon(
               onPressed: () async {
@@ -235,13 +258,12 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
             ),
             const SizedBox(height: 16),
           ],
-          if (!_isProjects)
-            TextField(
+          TextField(
               controller: _name,
               textCapitalization: TextCapitalization.sentences,
               decoration: InputDecoration(
                 labelText: 'Askılık adı',
-                hintText: _isNotes ? 'Notlar' : 'Reels',
+                hintText: _isProjects ? 'Projeler' : _isNotes ? 'Notlar' : 'Reels',
                 border: const OutlineInputBorder(),
               ),
             ),

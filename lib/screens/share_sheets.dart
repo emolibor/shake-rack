@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import '../services/board.dart';
 import '../services/store.dart';
+import '../widgets/people.dart';
 
 const _apkUrl =
     'https://github.com/emolibor/shake-rack/releases/download/latest/shake-rack.apk';
@@ -123,6 +124,38 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
             ),
           ),
         ],
+        if (store.friends.values.any((f) => !b.people.containsKey(f.id))) ...[
+          const SizedBox(height: 12),
+          const Text('Arkadaşına doğrudan gönder',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          const Text('Kod gerekmez; askılık onun telefonunda kendiliğinden belirir.',
+              style: TextStyle(fontSize: 12, color: Colors.black54)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              for (final f in store.friends.values.where((f) => !b.people.containsKey(f.id)))
+                ActionChip(
+                  avatar: PersonAvatar(person: f, size: 22),
+                  label: Text(f.name.isEmpty ? 'İsimsiz' : f.name),
+                  onPressed: busy
+                      ? null
+                      : () => run(() async {
+                            if (!await ensureProfile(context, store)) return;
+                            if (!b.isShared) {
+                              await store.shareBoard(b, canEdit: canEdit, allowCopy: allowCopy);
+                            }
+                            await store.inviteFriend(b, f);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                  content: Text('${f.name} davet edildi 🤝')));
+                            }
+                          }),
+                ),
+            ],
+          ),
+        ],
         if (error != null)
           Padding(
             padding: const EdgeInsets.only(top: 10),
@@ -134,6 +167,7 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
             onPressed: busy
                 ? null
                 : () => run(() async {
+                      if (!await ensureProfile(context, store)) return;
                       await store.shareBoard(b, canEdit: canEdit, allowCopy: allowCopy);
                       await Share.share(_inviteText(b), subject: b.name);
                     }),
@@ -271,7 +305,10 @@ Future<Board?> showJoinSheet(BuildContext context, RackStore store) {
           ),
           const SizedBox(height: 12),
           FilledButton.icon(
-            onPressed: () => Navigator.pop(ctx, store.joinShared(d)),
+            onPressed: () async {
+              if (!await ensureProfile(context, store)) return;
+              if (ctx.mounted) Navigator.pop(ctx, store.joinShared(d));
+            },
             icon: Icon(canEdit ? Icons.group_add : Icons.visibility_outlined),
             label: Text(canEdit ? 'Askılığa katıl (birlikte düzenle)' : 'Askılığa katıl (izle)'),
           ),

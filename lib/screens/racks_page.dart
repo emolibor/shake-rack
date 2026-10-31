@@ -30,12 +30,14 @@ class _RacksPageState extends State<RacksPage> {
     return AnimatedBuilder(
       animation: store,
       builder: (context, _) {
-        final board = store.boardById(_selected) ?? store.projects;
+        final all = store.boards;
+        final Board? board = store.boardById(_selected) ??
+            (all.isEmpty ? null : all.first);
         return Column(
           children: [
             _HangerTabs(
               boards: store.boards,
-              selectedId: board.id,
+              selectedId: board?.id ?? '',
               onSelect: (b) => setState(() => _selected = b.id),
               onEdit: (b) => (b.role == ShareRole.editor || b.role == ShareRole.viewer)
                   ? showSharedInfoSheet(context, store, b)
@@ -44,11 +46,13 @@ class _RacksPageState extends State<RacksPage> {
               onAdd: _create,
             ),
             Expanded(
-              child: RackScreen(
-                key: ValueKey(board.id),
-                store: store,
-                board: board,
-              ),
+              child: board == null
+                  ? _Welcome(onCreate: _create)
+                  : RackScreen(
+                      key: ValueKey(board.id),
+                      store: store,
+                      board: board,
+                    ),
             ),
           ],
         );
@@ -219,6 +223,44 @@ class _HangerTabs extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Hiç askılık yokken: karşılama.
+class _Welcome extends StatelessWidget {
+  final VoidCallback onCreate;
+  const _Welcome({required this.onCreate});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFFEFE6D6),
+      padding: const EdgeInsets.all(32),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const HangerLogo(size: 84, color: Color(0xFF8B6A3E)),
+            const SizedBox(height: 16),
+            const Text('Askılığın boş',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            const Text(
+              'Alışveriş, yapılacaklar, içerik fikirleri, projeler…\n'
+              'Bir askılık aç, notlarını ipe as, bitince tikle.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.black54, height: 1.4),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: onCreate,
+              icon: const Icon(Icons.add),
+              label: const Text('Askılık aç'),
+            ),
+          ],
         ),
       ),
     );

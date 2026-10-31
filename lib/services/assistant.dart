@@ -87,6 +87,10 @@ class RackAssistant {
   String answer(String raw) => reply(raw).text;
 
   String _answer(String raw) {
+    if (store.projectsHidden) {
+      return 'Sohbet, Projeler askılığındaki işleri listeliyor ve şu an o askılık yok.\n\n'
+          'Proje takibi yapmak istersen: Askılık → + Yeni → "Ekip projeleri".';
+    }
     final q = _norm(raw);
     final types = _typesIn(q);
     final member = _memberIn(q);

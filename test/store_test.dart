@@ -1,9 +1,11 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shake_rack/services/assistant.dart';
 import 'package:shake_rack/services/board.dart';
+import 'package:shake_rack/models/models.dart';
 import 'package:shake_rack/services/store.dart';
 
 void main() {
@@ -52,11 +54,16 @@ void main() {
       expect(b.custom.single.cards.length, 2);
     });
 
-    test('askılık silinir, Projeler silinemez', () {
+    test('askılık silinir; Projeler de silinip geri eklenebilir', () async {
       final store = RackStore();
+      store.addCard('Atilla', ['Mimari Proje']);
       final r = store.addBoard('Reels', ['Instagram']);
-      store.deleteBoard(r);
-      store.deleteBoard(store.projects);
+      await store.deleteBoard(r);
+      expect(store.boards.map((b) => b.id), ['projects']);
+      await store.deleteBoard(store.projects);
+      expect(store.boards, isEmpty);
+      expect(store.projects.cards, isEmpty); // ekip koduna bağlı değil → temizlendi
+      store.showProjects();
       expect(store.boards.map((b) => b.id), ['projects']);
     });
   });
@@ -296,6 +303,94 @@ void main() {
       expect(b.shareCodePretty, 'K7P2-QX9M');
       expect(b.role, ShareRole.viewer);
       expect(b.allowCopy, isFalse);
+    });
+  });
+
+  group('Projeler isteğe bağlı', () {
+    test('ad değişir, grupla paylaşılır ve kayıttan geri gelir', () async {
+      final a = RackStore();
+      a.updateBoard(a.projects, name: 'İşler');
+      expect(a.sharedJson()['projectsName'], 'İşler');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final b = RackStore();
+      await b.load();
+      expect(b.projects.name, 'İşler');
+    });
+
+    test('gizliyken kalıcıdır, sohbet bilgi verir', () async {
+      final a = RackStore();
+      await a.hideProjects();
+      a.addBoard('Alışveriş', const [], kind: BoardKind.notes);
+      final b = RackStore();
+      await b.load();
+      expect(b.projectsHidden, isTrue);
+      expect(b.boards.map((x) => x.name), ['Alışveriş']);
+      expect(RackAssistant(b).answer('hangi projeler kaldı'), contains('Ekip projeleri'));
+    });
+  });
+
+  group('Profil ve arkadaşlar', () {
+    test('profil oluşturulur ve kayıttan geri gelir', () async {
+      final a = RackStore();
+      await a.load();
+      expect(a.profile.id, isNotEmpty);
+      expect(a.hasProfile, isFalse);
+      await a.updateProfile(name: ' Emirhan ', emoji: '🦊');
+      final b = RackStore();
+      await b.load();
+      expect(b.profile.id, a.profile.id);
+      expect(b.profile.name, 'Emirhan');
+      expect(b.profile.badge, '🦊');
+    });
+
+    test('paylaşılan askılıktaki kişiler arkadaş olur, ortak askılık görünür', () {
+      final guest = RackStore()
+        ..profile = const Member(id: 'p-guest', name: 'Ben', color: Color(0xFF2E7DE0));
+      final reels = Board.custom('Reels', ['Instagram']);
+      final b = guest.joinShared({
+        ...reels.sharePayload(),
+        'permission': 'edit',
+        'allowCopy': true,
+        'code': 'K7P2QX9M',
+        'members': {
+          'p-ayse': {'name': 'Ayşe', 'color': 0xFFE02E7D, 'emoji': '🌻', 'role': 'owner'},
+        },
+      });
+      expect(guest.friends['p-ayse']!.name, 'Ayşe');
+      expect(guest.boardsWith('p-ayse'), [b]);
+      expect(b.people, {'p-ayse': 'owner', 'p-guest': 'editor'});
+
+      // sonradan biri daha katıldı → snapshot ile gelir
+      guest.applySharedSnapshot(b, {
+        ...b.sharePayload(),
+        'permission': 'edit',
+        'members': {
+          'p-ayse': {'name': 'Ayşe', 'color': 0xFFE02E7D, 'emoji': '🌻', 'role': 'owner'},
+          'p-guest': {'name': 'Ben', 'color': 0xFF2E7DE0, 'role': 'editor'},
+          'p-mert': {'name': 'Mert', 'color': 0xFF14A3A3, 'role': 'viewer'},
+        },
+        'updatedBy': 'baska-cihaz',
+      });
+      expect(guest.friends.keys.toSet(), {'p-ayse', 'p-mert'}); // kendim yokum
+      expect(b.people['p-mert'], 'viewer');
+      expect(guest.memberById('p-mert')!.name, 'Mert');
+    });
+
+    test('paylaşılan askılıkta tik profil kimliğiyle atılır', () {
+      final guest = RackStore()
+        ..profile = const Member(id: 'p-guest', name: 'Ben', color: Color(0xFF9B4DE0));
+      final reels = Board.custom('Reels', ['Instagram']);
+      reels.cards.add(CompanyCard(
+          id: 'c1', name: 'Video', items: [ProjectItem(type: 'Instagram')]));
+      final b = guest.joinShared({
+        ...reels.sharePayload(),
+        'permission': 'edit',
+        'code': 'ABCD2345',
+      });
+      final c = b.cards.single;
+      b.toggleItem(c, c.items.single);
+      expect(c.items.single.doneBy, 'p-guest');
+      expect(guest.memberById('p-guest')!.color, const Color(0xFF9B4DE0));
     });
   });
 }

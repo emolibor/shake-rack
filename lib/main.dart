@@ -83,7 +83,7 @@ class _HomeState extends State<_Home> {
       ChatScreen(store: store),
       TeamScreen(store: store),
     ];
-    const titles = ['Askılık', 'Tamamlananlar', 'Mesaj', 'Ekip'];
+    const titles = ['Askılık', 'Tamamlananlar', 'Mesaj', 'Profil'];
 
     return Scaffold(
       appBar: AppBar(
@@ -121,8 +121,12 @@ class _HomeState extends State<_Home> {
                 Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Chip(
-                avatar: CircleAvatar(backgroundColor: store.me.color, radius: 8),
-                label: Text(store.me.name, style: const TextStyle(fontSize: 12)),
+                avatar: CircleAvatar(
+                    backgroundColor:
+                        store.hasProfile ? store.profile.color : store.me.color,
+                    radius: 8),
+                label: Text(store.hasProfile ? store.profile.name : store.me.name,
+                    style: const TextStyle(fontSize: 12)),
                 visualDensity: VisualDensity.compact,
               ),
             ),
@@ -149,7 +153,7 @@ class _HomeState extends State<_Home> {
             label: 'Tamamlanan',
           ),
           const NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: 'Mesaj'),
-          const NavigationDestination(icon: Icon(Icons.group_outlined), label: 'Ekip'),
+          const NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profil'),
         ],
       ),
     );

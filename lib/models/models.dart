@@ -29,12 +29,25 @@ class Member {
   final String id;
   final String name;
   final Color color;
-  const Member({required this.id, required this.name, required this.color});
+  final String emoji; // profil simgesi (arkadaşlar için), boş olabilir
+  const Member(
+      {required this.id, required this.name, required this.color, this.emoji = ''});
+
+  /// Daire içinde gösterilecek: emoji ya da ismin baş harfi.
+  String get badge => emoji.isNotEmpty
+      ? emoji
+      : (name.trim().isEmpty ? '?' : name.trim().characters.first.toUpperCase());
+
+  Member copyWith({String? name, Color? color, String? emoji}) => Member(
+      id: id, name: name ?? this.name, color: color ?? this.color, emoji: emoji ?? this.emoji);
 
   Map<String, dynamic> toJson() =>
-      {'id': id, 'name': name, 'color': color.value};
-  factory Member.fromJson(Map<String, dynamic> j) =>
-      Member(id: j['id'], name: j['name'], color: Color(j['color']));
+      {'id': id, 'name': name, 'color': color.value, 'emoji': emoji};
+  factory Member.fromJson(Map<String, dynamic> j) => Member(
+      id: j['id'],
+      name: j['name'] ?? '',
+      color: Color(j['color'] ?? 0xFF8B6A3E),
+      emoji: j['emoji'] ?? '');
 }
 
 /// Kullanıcı renkleri; yeni eklenen kullanıcı sıradakini alır.

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/board.dart';
 import '../services/store.dart';
+import '../widgets/people.dart';
 import '../widgets/rope_card.dart';
 import 'card_edit_screen.dart';
 
@@ -158,7 +159,7 @@ class _RackScreenState extends State<RackScreen> {
             final cards = board.active;
             return Column(
               children: [
-                if (!board.isProjects) _StatusBand(board: board),
+                if (!board.isProjects) _StatusBand(board: board, store: store),
                 const SizedBox(height: 8),
                 SizedBox(
                   height: 28,
@@ -389,7 +390,8 @@ class _BalloonPopState extends State<_BalloonPop>
 /// İpin üstündeki ince bilgi bandı: özel / paylaşılıyor / sadece inceleme.
 class _StatusBand extends StatelessWidget {
   final Board board;
-  const _StatusBand({required this.board});
+  final RackStore store;
+  const _StatusBand({required this.board, required this.store});
 
   @override
   Widget build(BuildContext context) {
@@ -413,19 +415,27 @@ class _StatusBand extends StatelessWidget {
       icon = Icons.visibility_outlined;
       text = 'Paylaşılan askılık · sadece inceleme';
     }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 13, color: c),
-          const SizedBox(width: 4),
-          Flexible(
-            child: Text(text,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11.5, color: c)),
-          ),
-        ],
+    final others = board.isShared ? boardPeople(store, board) : const <Member>[];
+    return InkWell(
+      onTap: board.isShared ? () => showPeopleSheet(context, store, board) : null,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 13, color: c),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(text,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11.5, color: c)),
+            ),
+            if (others.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              AvatarStack(people: others, size: 20),
+            ],
+          ],
+        ),
       ),
     );
   }
