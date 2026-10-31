@@ -2,14 +2,16 @@ import 'dart:math';
 import 'package:confetti/confetti.dart';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
+import '../services/board.dart';
 import '../services/store.dart';
 import '../widgets/rope_card.dart';
 import 'card_edit_screen.dart';
 
-/// Ana ekran: ip + asılı kartlar. Sürükle-bırak ile öncelik sırası.
+/// Bir askılığın ekranı: ip + asılı kartlar. Sürükle-bırak ile öncelik sırası.
 class RackScreen extends StatefulWidget {
   final RackStore store;
-  const RackScreen({super.key, required this.store});
+  final Board board;
+  const RackScreen({super.key, required this.store, required this.board});
 
   @override
   State<RackScreen> createState() => _RackScreenState();
@@ -31,7 +33,8 @@ class _RackScreenState extends State<RackScreen> {
   }
 
   Future<void> _onToggle(CompanyCard card, ProjectItem item) async {
-    final finished = widget.store.toggleItem(card, item);
+    final board = widget.board;
+    final finished = board.toggleItem(card, item);
     if (!finished) return;
     _confetti.play();
     // Balon patlama animasyonu + tamamlandı diyaloğu
@@ -41,12 +44,12 @@ class _RackScreenState extends State<RackScreen> {
       builder: (_) => _BalloonPop(name: card.name),
     );
     if (!mounted) return;
-    widget.store.markCompleted(card);
+    board.markCompleted(card);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('${card.name} Tamamlananlara taşındı 🎉'),
       action: SnackBarAction(
         label: 'Geri al',
-        onPressed: () => widget.store.reopen(card),
+        onPressed: () => board.reopen(card),
       ),
     ));
   }
@@ -55,13 +58,15 @@ class _RackScreenState extends State<RackScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-          builder: (_) => CardEditScreen(store: widget.store, card: card)),
+          builder: (_) => CardEditScreen(
+              store: widget.store, board: widget.board, card: card)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final store = widget.store;
+    final board = widget.board;
     return Stack(
       children: [
         // duvar dokusu
@@ -69,9 +74,22 @@ class _RackScreenState extends State<RackScreen> {
         AnimatedBuilder(
           animation: store,
           builder: (context, _) {
-            final cards = store.active;
+            final cards = board.active;
             return Column(
               children: [
+                if (board.isPrivate)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.lock_outline, size: 13, color: Colors.brown.shade400),
+                        const SizedBox(width: 4),
+                        Text('Özel askılık · sadece bu telefonda',
+                            style: TextStyle(fontSize: 11.5, color: Colors.brown.shade400)),
+                      ],
+                    ),
+                  ),
                 const SizedBox(height: 8),
                 SizedBox(
                   height: 28,
@@ -80,11 +98,11 @@ class _RackScreenState extends State<RackScreen> {
                 ),
                 Expanded(
                   child: cards.isEmpty
-                      ? _Empty(onAdd: () => _openEdit())
+                      ? _Empty(board: board, onAdd: () => _openEdit())
                       : ReorderableListView.builder(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
                           buildDefaultDragHandles: false,
-                          onReorder: store.reorderActive,
+                          onReorder: board.reorderActive,
                           proxyDecorator: (child, i, anim) => Transform.scale(
                               scale: 1.03, child: Material(color: Colors.transparent, child: child)),
                           itemCount: cards.length,
@@ -134,8 +152,9 @@ class _RackScreenState extends State<RackScreen> {
 }
 
 class _Empty extends StatelessWidget {
+  final Board board;
   final VoidCallback onAdd;
-  const _Empty({required this.onAdd});
+  const _Empty({required this.board, required this.onAdd});
   @override
   Widget build(BuildContext context) => Center(
         child: Column(
@@ -143,7 +162,7 @@ class _Empty extends StatelessWidget {
           children: [
             const HangerLogo(size: 72, color: Color(0xFF8B6A3E)),
             const SizedBox(height: 12),
-            const Text('İp boş. İlk firmayı as!',
+            Text(board.isProjects ? 'İp boş. İlk firmayı as!' : '${board.name} ipi boş. İlk kartı as!',
                 style: TextStyle(fontSize: 16, color: Colors.black54)),
             const SizedBox(height: 12),
             OutlinedButton.icon(

@@ -5,26 +5,45 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
+import 'board.dart';
 
 /// Tüm uygulama durumu.
 ///
 /// - Her değişiklik önce yerelde (shared_preferences) saklanır → çevrimdışı çalışır.
-/// - Bir "askılık kodu" girildiyse aynı veri Firestore'da `racks/{kod}` belgesine
-///   yazılır ve oradan canlı dinlenir → iki telefon aynı ipi görür.
+/// - **Projeler** askılığı ve kullanıcı listesi, bir "askılık kodu" girildiyse
+///   Firestore'da `racks/{kod}` belgesine yazılır → grup aynı ipi görür.
+/// - **Özel askılıklar** yalnızca bu telefonda saklanır; buluta hiç gönderilmez.
 class RackStore extends ChangeNotifier {
-  static const _kCards = 'cards_v1';
+  static const _kCards = 'cards_v1'; // Projeler askılığının kartları
+  static const _kCustom = 'custom_boards_v1'; // özel askılıklar (yerel)
   static const _kMembers = 'members_v1';
   static const _kCurrent = 'current_member_v1';
   static const _kRackCode = 'rack_code_v1';
   static const _kDeviceId = 'device_id_v1';
 
+  final _uuid = const Uuid();
+
   /// Bu cihaza özel kimlik — kendi yazdığımız güncellemeyi tanımak için.
   String deviceId = '';
 
-  final _uuid = const Uuid();
-  List<CompanyCard> cards = [];
+  late final Board projects = Board.projects()..store = this;
+  List<Board> custom = [];
   List<Member> members = List.of(kDefaultMembers);
   String currentMemberId = 'me';
+
+  /// Sekme sırası: Projeler + özel askılıklar.
+  List<Board> get boards => [projects, ...custom];
+  Board? boardById(String id) =>
+      boards.cast<Board?>().firstWhere((b) => b!.id == id, orElse: () => null);
+
+  // Projeler askılığına kısayollar (asistan ve eski kod için)
+  List<CompanyCard> get cards => projects.cards;
+  List<CompanyCard> get active => projects.active;
+  List<CompanyCard> get completed => projects.completed;
+  CompanyCard addCard(String name, List<String> types, {String? assignedTo}) =>
+      projects.addCard(name, types, assignedTo: assignedTo);
+  bool toggleItem(CompanyCard card, ProjectItem item) =>
+      projects.toggleItem(card, item);
 
   /// Paylaşılan askılık kodu (ör. "fourmis-2026"). Boşsa sadece yerel.
   String rackCode = '';
@@ -33,7 +52,7 @@ class RackStore extends ChangeNotifier {
   String syncStatus = 'Yerel';
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
-  int _revision = 0; // kendi yazdığımızı geri okumamak için
+  int _revision = 0;
   Timer? _debounce;
 
   Member get me => members.firstWhere((m) => m.id == currentMemberId,
@@ -42,57 +61,85 @@ class RackStore extends ChangeNotifier {
       ? null
       : members.cast<Member?>().firstWhere((m) => m!.id == id, orElse: () => null);
 
-  List<CompanyCard> get active => cards.where((c) => !c.completed).toList();
-  List<CompanyCard> get completed => cards.where((c) => c.completed).toList()
-    ..sort((a, b) =>
-        (b.completedAt ?? b.createdAt).compareTo(a.completedAt ?? a.createdAt));
-
   // ---------- yükleme / kayıt ----------
 
   Future<void> load() async {
     final p = await SharedPreferences.getInstance();
     final c = p.getString(_kCards);
     if (c != null) {
-      cards = (jsonDecode(c) as List).map((e) => CompanyCard.fromJson(e)).toList();
+      projects.cards =
+          (jsonDecode(c) as List).map((e) => CompanyCard.fromJson(e)).toList();
+    }
+    final cb = p.getString(_kCustom);
+    if (cb != null) {
+      custom = (jsonDecode(cb) as List)
+          .map((e) => Board.fromJson(Map<String, dynamic>.from(e))..store = this)
+          .toList();
     }
     final m = p.getString(_kMembers);
     if (m != null) {
       members = (jsonDecode(m) as List).map((e) => Member.fromJson(e)).toList();
     }
+    final renamed = _migrateMemberNames();
     currentMemberId = p.getString(_kCurrent) ?? 'me';
+    if (memberById(currentMemberId) == null) currentMemberId = members.first.id;
     rackCode = p.getString(_kRackCode) ?? '';
     deviceId = p.getString(_kDeviceId) ?? '';
     if (deviceId.isEmpty) {
       deviceId = _uuid.v4();
       await p.setString(_kDeviceId, deviceId);
     }
+    if (renamed) await _saveLocal();
     notifyListeners();
     if (rackCode.isNotEmpty) _listen();
   }
 
+  /// "Ben"/"Arkadaşım" gibi eski varsayılan adları "Kullanıcı 1/2" yap.
+  bool _migrateMemberNames() {
+    var changed = false;
+    for (var i = 0; i < members.length; i++) {
+      final n = kLegacyMemberNames[members[i].name];
+      if (n != null) {
+        members[i] = Member(id: members[i].id, name: n, color: members[i].color);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   Future<void> _saveLocal() async {
     final p = await SharedPreferences.getInstance();
-    await p.setString(_kCards, jsonEncode(cards.map((e) => e.toJson()).toList()));
-    await p.setString(_kMembers, jsonEncode(members.map((e) => e.toJson()).toList()));
+    await p.setString(
+        _kCards, jsonEncode(projects.cards.map((e) => e.toJson()).toList()));
+    await p.setString(
+        _kCustom, jsonEncode(custom.map((e) => e.toJson()).toList()));
+    await p.setString(
+        _kMembers, jsonEncode(members.map((e) => e.toJson()).toList()));
     await p.setString(_kCurrent, currentMemberId);
     await p.setString(_kRackCode, rackCode);
   }
 
-  Map<String, dynamic> _toCloud() => {
-        'cards': cards.map((e) => e.toJson()).toList(),
+  /// Grupla paylaşılan veri. Özel askılıklar burada YOK.
+  Map<String, dynamic> sharedJson() => {
+        'cards': projects.cards.map((e) => e.toJson()).toList(),
         'members': members.map((e) => e.toJson()).toList(),
+      };
+
+  Map<String, dynamic> _toCloud() => {
+        ...sharedJson(),
         'revision': _revision,
         'updatedAt': FieldValue.serverTimestamp(),
         'updatedBy': deviceId,
       };
 
   void _applyCloud(Map<String, dynamic> d) {
-    cards = (d['cards'] as List? ?? [])
+    projects.cards = (d['cards'] as List? ?? [])
         .map((e) => CompanyCard.fromJson(Map<String, dynamic>.from(e)))
         .toList();
     final ms = d['members'] as List?;
     if (ms != null && ms.isNotEmpty) {
-      members = ms.map((e) => Member.fromJson(Map<String, dynamic>.from(e))).toList();
+      members =
+          ms.map((e) => Member.fromJson(Map<String, dynamic>.from(e))).toList();
     }
     _revision = (d['revision'] as int?) ?? _revision;
   }
@@ -135,6 +182,10 @@ class RackStore extends ChangeNotifier {
       final pending = _debounce?.isActive ?? false;
       if (d['updatedBy'] != deviceId && !pending) {
         _applyCloud(d);
+        if (_migrateMemberNames()) _pushCloud();
+        if (memberById(currentMemberId) == null) {
+          currentMemberId = members.first.id;
+        }
         await _saveLocal();
       }
       syncStatus = snap.metadata.isFromCache ? 'Çevrimdışı' : 'Eşitlendi';
@@ -147,7 +198,8 @@ class RackStore extends ChangeNotifier {
 
   /// Askılık koduna katıl veya ayrıl (boş kod = sadece yerel).
   Future<void> setRackCode(String code) async {
-    rackCode = code.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9\-_]'), '-');
+    rackCode =
+        code.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9\-_]'), '-');
     await _saveLocal();
     _sub?.cancel();
     _sub = null;
@@ -159,84 +211,32 @@ class RackStore extends ChangeNotifier {
     _listen();
   }
 
-  void _commit() {
+  /// Board değişince çağrılır. Sadece Projeler buluta gider.
+  void boardChanged(Board b) {
     notifyListeners();
     _saveLocal();
-    _pushCloud();
+    if (b.isProjects) _pushCloud();
   }
 
-  // ---------- kartlar ----------
-  CompanyCard addCard(String name, List<String> types, {String? assignedTo}) {
-    final card = CompanyCard(
-      id: _uuid.v4(),
-      name: name.trim(),
-      items: types.map((t) => ProjectItem(type: t)).toList(),
-      assignedTo: assignedTo,
-    );
-    cards.add(card);
-    _commit();
-    return card;
+  // ---------- özel askılıklar ----------
+  Board addBoard(String name, List<String> template) {
+    final b = Board.custom(name, template)..store = this;
+    custom.add(b);
+    boardChanged(b);
+    return b;
   }
 
-  void updateCard(CompanyCard card,
-      {String? name,
-      List<String>? types,
-      String? notes,
-      String? assignedTo,
-      bool clearAssignee = false}) {
-    if (name != null) card.name = name.trim();
-    if (notes != null) card.notes = notes;
-    if (clearAssignee) {
-      card.assignedTo = null;
-    } else if (assignedTo != null) {
-      card.assignedTo = assignedTo;
-    }
-    if (types != null) {
-      final old = {for (final i in card.items) i.type: i};
-      card.items = types.map((t) => old[t] ?? ProjectItem(type: t)).toList();
-    }
-    _commit();
+  void updateBoard(Board b, {String? name, List<String>? template}) {
+    if (b.isProjects) return;
+    if (name != null && name.trim().isNotEmpty) b.name = name.trim();
+    if (template != null) b.template = template;
+    boardChanged(b);
   }
 
-  void deleteCard(CompanyCard card) {
-    cards.remove(card);
-    _commit();
-  }
-
-  void reorderActive(int oldIndex, int newIndex) {
-    final act = active;
-    if (newIndex > oldIndex) newIndex -= 1;
-    final moved = act.removeAt(oldIndex);
-    act.insert(newIndex, moved);
-    final done = cards.where((c) => c.completed).toList();
-    cards = [...act, ...done];
-    _commit();
-  }
-
-  bool toggleItem(CompanyCard card, ProjectItem item) {
-    item.done = !item.done;
-    if (item.done) {
-      item.doneBy = currentMemberId;
-      item.doneAt = DateTime.now();
-    } else {
-      item.doneBy = null;
-      item.doneAt = null;
-    }
-    final finished = card.allDone;
-    _commit();
-    return finished;
-  }
-
-  void markCompleted(CompanyCard card) {
-    card.completed = true;
-    card.completedAt = DateTime.now();
-    _commit();
-  }
-
-  void reopen(CompanyCard card) {
-    card.completed = false;
-    card.completedAt = null;
-    _commit();
+  void deleteBoard(Board b) {
+    if (b.isProjects) return;
+    custom.remove(b);
+    boardChanged(b);
   }
 
   // ---------- ekip ----------
@@ -246,15 +246,49 @@ class RackStore extends ChangeNotifier {
     _saveLocal(); // kişi seçimi cihaza özel, buluta gitmez
   }
 
+  void _membersChanged() {
+    notifyListeners();
+    _saveLocal();
+    _pushCloud();
+  }
+
+  /// Sıradaki numarayla "Kullanıcı N" ekler.
+  Member addMember() {
+    var n = members.length + 1;
+    final names = members.map((m) => m.name).toSet();
+    while (names.contains('Kullanıcı $n')) {
+      n++;
+    }
+    final used = members.map((m) => m.color.value).toSet();
+    final color = kMemberPalette.firstWhere((c) => !used.contains(c.value),
+        orElse: () => kMemberPalette[members.length % kMemberPalette.length]);
+    final m = Member(id: _uuid.v4(), name: 'Kullanıcı $n', color: color);
+    members.add(m);
+    _membersChanged();
+    return m;
+  }
+
+  /// Kullanıcıyı sil. Son kullanıcı silinemez. Atandığı kartlar boşa düşer.
+  bool removeMember(String id) {
+    if (members.length <= 1) return false;
+    members.removeWhere((m) => m.id == id);
+    for (final c in projects.cards) {
+      if (c.assignedTo == id) c.assignedTo = null;
+    }
+    if (currentMemberId == id) currentMemberId = members.first.id;
+    _membersChanged();
+    return true;
+  }
+
   void updateMember(String id, {String? name, Color? color}) {
     final i = members.indexWhere((m) => m.id == id);
     if (i < 0) return;
     members[i] = Member(
       id: id,
-      name: name ?? members[i].name,
+      name: (name == null || name.trim().isEmpty) ? members[i].name : name.trim(),
       color: color ?? members[i].color,
     );
-    _commit();
+    _membersChanged();
   }
 
   @override

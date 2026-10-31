@@ -37,11 +37,23 @@ class Member {
       Member(id: j['id'], name: j['name'], color: Color(j['color']));
 }
 
-/// Varsayılan ekip: sen ve arkadaşın. Ayarlardan isim/renk değiştirilebilir.
-const List<Member> kDefaultMembers = [
-  Member(id: 'me', name: 'Ben', color: Color(0xFF2E7DE0)),
-  Member(id: 'friend', name: 'Arkadaşım', color: Color(0xFF2EA35A)),
+/// Kullanıcı renkleri; yeni eklenen kullanıcı sıradakini alır.
+const List<Color> kMemberPalette = [
+  Color(0xFF2E7DE0), Color(0xFF2EA35A), Color(0xFFE0652E), Color(0xFF9B4DE0),
+  Color(0xFFE02E7D), Color(0xFF14A3A3), Color(0xFFC9A200), Color(0xFF555555),
 ];
+
+/// Varsayılan ekip: Kullanıcı 1 ve 2. Ekip sekmesinden eklenir / düzenlenir.
+const List<Member> kDefaultMembers = [
+  Member(id: 'me', name: 'Kullanıcı 1', color: Color(0xFF2E7DE0)),
+  Member(id: 'friend', name: 'Kullanıcı 2', color: Color(0xFF2EA35A)),
+];
+
+/// Eski sürümlerdeki varsayılan adlar → yeni adlar.
+const Map<String, String> kLegacyMemberNames = {
+  'Ben': 'Kullanıcı 1',
+  'Arkadaşım': 'Kullanıcı 2',
+};
 
 /// Bir firmanın altındaki tek bir proje kalemi.
 class ProjectItem {

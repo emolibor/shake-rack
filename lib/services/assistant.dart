@@ -40,10 +40,15 @@ class RackAssistant {
 
   /// Sorudan kişi çıkar: "benim/bende/bana" → bu telefonun sahibi, ya da kişi adı.
   String? _memberIn(String q) {
-    for (final m in store.members) {
+    // uzun isim önce: "kullanıcı 12" sorusu "kullanıcı 1" ile karışmasın
+    final sorted = [...store.members]
+      ..sort((a, b) => b.name.length.compareTo(a.name.length));
+    for (final m in sorted) {
       final n = _norm(m.name).trim();
       if (n.isEmpty) continue;
-      if (n.contains(' ') ? q.contains(n) : _word(q, n)) return m.id;
+      if (RegExp('(^|[^a-z0-9])${RegExp.escape(n)}(?![0-9])').hasMatch(q)) {
+        return m.id;
+      }
     }
     if (_word(q, 'benim') || _word(q, 'bende') || _word(q, 'bana')) {
       return store.currentMemberId;

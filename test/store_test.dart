@@ -1,0 +1,116 @@
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shake_rack/services/assistant.dart';
+import 'package:shake_rack/services/store.dart';
+
+void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  group('Özel askılıklar', () {
+    test('buluta giden veride özel askılık yok', () {
+      final store = RackStore();
+      store.addCard('Atilla Tekstil', ['Mimari Proje']);
+      final reels = store.addBoard('Reels', ['Instagram', 'YouTube']);
+      reels.addCard('GİZLİ kat planı videosu', reels.template);
+
+      final shared = jsonEncode(store.sharedJson());
+      expect(shared, contains('Atilla Tekstil'));
+      expect(shared, isNot(contains('GİZLİ')));
+      expect(shared, isNot(contains('Reels')));
+      expect(shared, isNot(contains('Instagram')));
+    });
+
+    test('şablon maddeleriyle kart, hepsi tiklenince tamamlanır', () {
+      final store = RackStore();
+      final reels = store.addBoard('Reels', ['Instagram', 'YouTube']);
+      final c = reels.addCard('Cephe çizimi', reels.template);
+      expect(c.items.map((e) => e.type), ['Instagram', 'YouTube']);
+      expect(reels.toggleItem(c, c.items[0]), isFalse);
+      expect(reels.toggleItem(c, c.items[1]), isTrue);
+      reels.markCompleted(c);
+      expect(reels.active, isEmpty);
+      expect(reels.completed.single.name, 'Cephe çizimi');
+      // Projeler askılığı etkilenmez
+      expect(store.projects.cards, isEmpty);
+    });
+
+    test('kayıttan geri yüklenir', () async {
+      final a = RackStore();
+      final reels = a.addBoard('Reels', ['Instagram']);
+      reels.addCard('Video 1', reels.template);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      final b = RackStore();
+      await b.load();
+      expect(b.custom.single.name, 'Reels');
+      expect(b.custom.single.cards.single.name, 'Video 1');
+      // geri yüklenen askılık da kaydedebilmeli
+      b.custom.single.addCard('Video 2', ['Instagram']);
+      expect(b.custom.single.cards.length, 2);
+    });
+
+    test('askılık silinir, Projeler silinemez', () {
+      final store = RackStore();
+      final r = store.addBoard('Reels', ['Instagram']);
+      store.deleteBoard(r);
+      store.deleteBoard(store.projects);
+      expect(store.boards.map((b) => b.id), ['projects']);
+    });
+  });
+
+  group('Kullanıcılar', () {
+    test('varsayılan adlar Kullanıcı 1 ve 2', () {
+      final store = RackStore();
+      expect(store.members.map((m) => m.name), ['Kullanıcı 1', 'Kullanıcı 2']);
+    });
+
+    test('eski adlar (Ben / Arkadaşım) yeni adlara çevrilir', () async {
+      SharedPreferences.setMockInitialValues({
+        'members_v1': jsonEncode([
+          {'id': 'me', 'name': 'Ben', 'color': 0xFF2E7DE0},
+          {'id': 'friend', 'name': 'Arkadaşım', 'color': 0xFF2EA35A},
+        ]),
+      });
+      final store = RackStore();
+      await store.load();
+      expect(store.members.map((m) => m.name), ['Kullanıcı 1', 'Kullanıcı 2']);
+    });
+
+    test('kullanıcı ekle → Kullanıcı 3, farklı renk', () {
+      final store = RackStore();
+      final m = store.addMember();
+      expect(m.name, 'Kullanıcı 3');
+      expect(store.members.where((x) => x.color.value == m.color.value).length, 1);
+    });
+
+    test('kullanıcı silinince atamaları boşalır, son kullanıcı silinmez', () {
+      final store = RackStore();
+      final c = store.projects.addCard('Cupplast', ['Elektrik Projesi'],
+          assignedTo: 'friend');
+      expect(store.removeMember('friend'), isTrue);
+      expect(c.assignedTo, isNull);
+      expect(store.removeMember('me'), isFalse);
+      expect(store.members.length, 1);
+    });
+
+    test('asistan "Kullanıcı 1" ile "Kullanıcı 12"yi karıştırmaz', () {
+      final store = RackStore();
+      while (store.members.length < 12) {
+        store.addMember();
+      }
+      final u12 = store.members.firstWhere((m) => m.name == 'Kullanıcı 12');
+      store.projects
+          .addCard('Demir Lojistik', ['Mimari Proje'], assignedTo: u12.id);
+      store.projects.addCard('Atilla', ['Mimari Proje'], assignedTo: 'me');
+      final bot = RackAssistant(store);
+      final a = bot.answer('Kullanıcı 12 kalan işler');
+      expect(a, contains('Demir'));
+      expect(a, isNot(contains('Atilla')));
+      final b = bot.answer('kullanıcı 1 kalan');
+      expect(b, contains('Atilla'));
+      expect(b, isNot(contains('Demir')));
+    });
+  });
+}

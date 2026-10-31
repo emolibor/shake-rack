@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'firebase_options.dart';
 import 'screens/chat_screen.dart';
 import 'screens/completed_screen.dart';
-import 'screens/rack_screen.dart';
+import 'screens/racks_page.dart';
 import 'screens/team_screen.dart';
 import 'services/store.dart';
 import 'services/updater.dart';
@@ -78,7 +78,7 @@ class _HomeState extends State<_Home> {
       );
     }
     final pages = [
-      RackScreen(store: store),
+      RacksPage(store: store),
       CompletedScreen(store: store),
       ChatScreen(store: store),
       TeamScreen(store: store),

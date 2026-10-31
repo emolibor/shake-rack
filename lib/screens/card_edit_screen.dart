@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
+import '../services/board.dart';
 import '../services/store.dart';
 
 /// Yeni kart ekleme / mevcut kartı düzenleme sayfası.
+/// Projeler askılığında: proje türleri + kişi ataması.
+/// Özel askılıkta: şablon maddeleri + karta özel ek maddeler.
 class CardEditScreen extends StatefulWidget {
   final RackStore store;
+  final Board board;
   final CompanyCard? card; // null ise yeni kart
-  const CardEditScreen({super.key, required this.store, this.card});
+  const CardEditScreen(
+      {super.key, required this.store, required this.board, this.card});
 
   @override
   State<CardEditScreen> createState() => _CardEditScreenState();
@@ -15,15 +20,29 @@ class CardEditScreen extends StatefulWidget {
 class _CardEditScreenState extends State<CardEditScreen> {
   late final TextEditingController _name;
   late final TextEditingController _notes;
-  late final Set<String> _types;
+  final _newItem = TextEditingController();
+  late final Set<String> _selected;
+
+  /// Gösterilecek tüm madde seçenekleri (şablon + karta özel olanlar).
+  late final List<String> _options;
   String? _assignee;
+
+  Board get board => widget.board;
 
   @override
   void initState() {
     super.initState();
     _name = TextEditingController(text: widget.card?.name ?? '');
     _notes = TextEditingController(text: widget.card?.notes ?? '');
-    _types = {...?widget.card?.items.map((e) => e.type)};
+    final existing = widget.card?.items.map((e) => e.type).toList() ?? [];
+    _options = [
+      ...board.template,
+      ...existing.where((t) => !board.template.contains(t)),
+    ];
+    // Yeni özel kartta şablonun hepsi seçili gelir; projelerde hiçbiri.
+    _selected = widget.card != null
+        ? existing.toSet()
+        : (board.isProjects ? <String>{} : board.template.toSet());
     _assignee = widget.card?.assignedTo;
   }
 
@@ -31,21 +50,33 @@ class _CardEditScreenState extends State<CardEditScreen> {
   void dispose() {
     _name.dispose();
     _notes.dispose();
+    _newItem.dispose();
     super.dispose();
   }
 
+  void _addItem() {
+    final t = _newItem.text.trim();
+    if (t.isEmpty) return;
+    setState(() {
+      if (!_options.contains(t)) _options.add(t);
+      _selected.add(t);
+      _newItem.clear();
+    });
+  }
+
   void _save() {
-    if (_name.text.trim().isEmpty || _types.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Firma adı ve en az bir proje seç.')));
+    if (_name.text.trim().isEmpty || _selected.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              '${board.cardTitleLabel} ve en az bir ${board.isProjects ? 'proje' : 'madde'} gerekli.')));
       return;
     }
-    final ordered = kProjectTypes.where(_types.contains).toList();
+    final ordered = _options.where(_selected.contains).toList();
     if (widget.card == null) {
-      final c = widget.store.addCard(_name.text, ordered, assignedTo: _assignee);
-      widget.store.updateCard(c, notes: _notes.text);
+      board.addCard(_name.text, ordered,
+          assignedTo: board.isProjects ? _assignee : null, notes: _notes.text);
     } else {
-      widget.store.updateCard(widget.card!,
+      board.updateCard(widget.card!,
           name: _name.text,
           types: ordered,
           notes: _notes.text,
@@ -55,34 +86,38 @@ class _CardEditScreenState extends State<CardEditScreen> {
     Navigator.pop(context);
   }
 
+  Future<void> _delete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Kartı sil?'),
+        content: Text('${widget.card!.name} ipten alınacak.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Vazgeç')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Sil')),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      board.deleteCard(widget.card!);
+      Navigator.pop(context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isNew = widget.card == null;
     return Scaffold(
       appBar: AppBar(
-        title: Text(isNew ? 'Yeni Kart' : 'Kartı Düzenle'),
+        title: Text(isNew ? 'Yeni Kart · ${board.name}' : 'Kartı Düzenle'),
         actions: [
           if (!isNew)
             IconButton(
-              icon: const Icon(Icons.delete_outline),
-              onPressed: () async {
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    title: const Text('Kartı sil?'),
-                    content: Text('${widget.card!.name} ipten alınacak.'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Vazgeç')),
-                      FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Sil')),
-                    ],
-                  ),
-                );
-                if (ok == true && mounted) {
-                  widget.store.deleteCard(widget.card!);
-                  Navigator.pop(context);
-                }
-              },
-            ),
+                icon: const Icon(Icons.delete_outline), onPressed: _delete),
         ],
       ),
       body: ListView(
@@ -90,56 +125,85 @@ class _CardEditScreenState extends State<CardEditScreen> {
         children: [
           TextField(
             controller: _name,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-              labelText: 'Firma adı',
-              hintText: 'Atilla Tekstil',
-              border: OutlineInputBorder(),
+            textCapitalization: TextCapitalization.sentences,
+            decoration: InputDecoration(
+              labelText: board.cardTitleLabel,
+              hintText: board.isProjects ? 'Atilla Tekstil' : 'Örn. Kat planı reels',
+              border: const OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 18),
-          const Text('Çizilecek projeler', style: TextStyle(fontWeight: FontWeight.w600)),
+          Text(board.itemsLabel,
+              style: const TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 8,
             runSpacing: 4,
-            children: kProjectTypes.map((t) {
-              final sel = _types.contains(t);
+            children: _options.map((t) {
+              final sel = _selected.contains(t);
               return FilterChip(
-                label: Text(kShortNames[t]!),
+                label: Text(kShortNames[t] ?? t),
                 selected: sel,
-                onSelected: (v) => setState(() => v ? _types.add(t) : _types.remove(t)),
+                onSelected: (v) =>
+                    setState(() => v ? _selected.add(t) : _selected.remove(t)),
               );
             }).toList(),
           ),
-          const SizedBox(height: 18),
-          const Text('Kim çizecek? (kart rengi)', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            children: [
-              ChoiceChip(
-                label: const Text('Atama yok'),
-                selected: _assignee == null,
-                onSelected: (_) => setState(() => _assignee = null),
-              ),
-              ...widget.store.members.map((m) => ChoiceChip(
-                    avatar: CircleAvatar(backgroundColor: m.color, radius: 8),
-                    label: Text(m.name),
-                    selected: _assignee == m.id,
-                    selectedColor: m.color.withOpacity(0.3),
-                    onSelected: (_) => setState(() => _assignee = m.id),
-                  )),
-            ],
-          ),
+          if (!board.isProjects) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _newItem,
+                    onSubmitted: (_) => _addItem(),
+                    decoration: const InputDecoration(
+                      hintText: 'Bu karta madde ekle (ör. TikTok)',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                    onPressed: _addItem, icon: const Icon(Icons.add)),
+              ],
+            ),
+          ],
+          if (board.isProjects) ...[
+            const SizedBox(height: 18),
+            const Text('Kim çizecek? (kart rengi)',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                ChoiceChip(
+                  label: const Text('Atama yok'),
+                  selected: _assignee == null,
+                  onSelected: (_) => setState(() => _assignee = null),
+                ),
+                ...widget.store.members.map((m) => ChoiceChip(
+                      avatar: CircleAvatar(backgroundColor: m.color, radius: 8),
+                      label: Text(m.name),
+                      selected: _assignee == m.id,
+                      selectedColor: m.color.withOpacity(0.3),
+                      onSelected: (_) => setState(() => _assignee = m.id),
+                    )),
+              ],
+            ),
+          ],
           const SizedBox(height: 18),
           TextField(
             controller: _notes,
             maxLines: 4,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Notlar',
-              hintText: 'Ölçüler alındı, kat planı bekleniyor...',
-              border: OutlineInputBorder(),
+              hintText: board.isProjects
+                  ? 'Ölçüler alındı, kat planı bekleniyor...'
+                  : 'Fikir, link, açıklama...',
+              border: const OutlineInputBorder(),
               alignLabelWithHint: true,
             ),
           ),

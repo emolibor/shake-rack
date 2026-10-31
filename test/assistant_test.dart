@@ -17,7 +17,7 @@ void main() {
     store.addCard('Cupplast', ['Elektrik Projesi', 'Raf Yerleşim Projesi'],
         assignedTo: 'friend');
     store.addCard('Demir Lojistik', ['Mimari Proje', 'Paratoner Projesi']);
-    // Atilla'nın elektriğini "Ben" çizdi
+    // Atilla'nın elektriğini Kullanıcı 1 çizdi
     store.toggleItem(atilla, atilla.items[1]);
     bot = RackAssistant(store);
   });
@@ -55,9 +55,9 @@ void main() {
     expect(a, isNot(contains('Cupplast')));
   });
 
-  test('"tarafından" raf sanılmaz', () {
-    final a = bot.answer('arkadaşım tarafından çizilecek kalan işler');
-    show('arkadaşım tarafından çizilecek kalan işler');
+  test('"tarafından" raf sanılmaz, kullanıcı adıyla süzer', () {
+    final a = bot.answer('Kullanıcı 2 tarafından çizilecek kalan işler');
+    show('Kullanıcı 2 tarafından çizilecek kalan işler');
     expect(a, contains('Cupplast'));
     expect(a, isNot(contains('Atilla')));
   });

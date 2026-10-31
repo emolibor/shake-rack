@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/models.dart';
 import '../services/store.dart';
 import '../services/updater.dart';
 
@@ -7,10 +8,7 @@ class TeamScreen extends StatelessWidget {
   final RackStore store;
   const TeamScreen({super.key, required this.store});
 
-  static const _palette = [
-    Color(0xFF2E7DE0), Color(0xFF2EA35A), Color(0xFFE0652E), Color(0xFF9B4DE0),
-    Color(0xFFE02E7D), Color(0xFF14A3A3), Color(0xFFC9A200), Color(0xFF555555),
-  ];
+  static const _palette = kMemberPalette;
 
   Future<void> _edit(BuildContext context, String id) async {
     final m = store.memberById(id)!;
@@ -20,7 +18,7 @@ class TeamScreen extends StatelessWidget {
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (context, setS) => AlertDialog(
-          title: const Text('Kişiyi düzenle'),
+          title: const Text('Kullanıcıyı düzenle'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -51,6 +49,33 @@ class TeamScreen extends StatelessWidget {
             ],
           ),
           actions: [
+            if (store.members.length > 1)
+              TextButton(
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                onPressed: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      title: Text('${m.name} silinsin mi?'),
+                      content: const Text(
+                          'Atandığı kartlar "atama yok" olur. Attığı tikler kalır ama gri görünür.'),
+                      actions: [
+                        TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('Vazgeç')),
+                        FilledButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Sil')),
+                      ],
+                    ),
+                  );
+                  if (ok == true && context.mounted) {
+                    store.removeMember(id);
+                    Navigator.pop(context);
+                  }
+                },
+                child: const Text('Sil'),
+              ),
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Vazgeç')),
             FilledButton(
                 onPressed: () {
@@ -73,7 +98,9 @@ class TeamScreen extends StatelessWidget {
         children: [
           const Padding(
             padding: EdgeInsets.all(8),
-            child: Text('Bu telefonu kim kullanıyor? Tik attığında senin rengin basılır.',
+            child: Text(
+                'Bu telefonu kim kullanıyor? Tik attığında seçili kullanıcının rengi basılır. '
+                'İsim ve rengi değiştirmek için renkli daireye dokun.',
                 style: TextStyle(color: Colors.black54)),
           ),
           ...store.members.map((m) => Card(
@@ -89,6 +116,16 @@ class TeamScreen extends StatelessWidget {
                   ),
                 ),
               )),
+          const SizedBox(height: 4),
+          OutlinedButton.icon(
+            onPressed: () {
+              final m = store.addMember();
+              ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('${m.name} eklendi')));
+            },
+            icon: const Icon(Icons.person_add_alt_1),
+            label: const Text('Kullanıcı ekle'),
+          ),
           const SizedBox(height: 24),
           const Divider(),
           _SyncCard(store: store),
