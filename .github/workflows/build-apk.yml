@@ -1,0 +1,83 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # android/ klasörü repoda yoksa Flutter'ın standart iskeletini üret.
+      # Var olan lib/ ve pubspec.yaml dosyalarına dokunmaz.
+      - name: Platform iskeleti
+        run: |
+          if [ ! -d android ]; then
+            flutter create --org com.fourmis --project-name shake_rack --platforms android,ios .
+            rm -rf test
+          fi
+
+      # Firebase eklentileri için minSdk 23, uygulama adı "Shake Rack"
+      - name: Android ayarları
+        run: |
+          for f in android/app/build.gradle android/app/build.gradle.kts; do
+            [ -f "$f" ] || continue
+            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' "$f"
+            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' "$f"
+          done
+          sed -i 's/android:label="[^"]*"/android:label="Shake Rack"/' android/app/src/main/AndroidManifest.xml
+          if [ -f ios/Runner/Info.plist ]; then
+            /usr/bin/env python3 - <<'PY'
+          import re
+          p = 'ios/Runner/Info.plist'
+          t = open(p).read()
+          t = re.sub(r'(<key>CFBundleDisplayName</key>\s*<string>)[^<]*', r'\1Shake Rack', t)
+          open(p, 'w').write(t)
+          PY
+          fi
+
+      - run: flutter pub get
+
+      - name: Uygulama ikonu
+        run: dart run flutter_launcher_icons
+
+      - name: APK derle
+        run: flutter build apk --release
+
+      - name: APK adını düzenle
+        run: cp build/app/outputs/flutter-apk/app-release.apk shake-rack.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shake-rack-apk
+          path: shake-rack.apk
+
+      # "latest" sürümünü her seferinde güncelle → telefondan hep aynı linkten indir.
+      - name: Releases'a yükle
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Shake Rack (son sürüm)
+          body: |
+            Telefona kurmak için **shake-rack.apk** dosyasını indir ve aç.
+            İlk kurulumda "bilinmeyen kaynaklardan yüklemeye izin ver" demen gerekebilir.
+            Derleme: ${{ github.sha }}
+          files: shake-rack.apk
+          make_latest: true
+          prerelease: false
