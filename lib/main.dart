@@ -37,6 +37,11 @@ class ShakeRackApp extends StatelessWidget {
         useMaterial3: true,
         colorSchemeSeed: const Color(0xFF8B6A3E),
         scaffoldBackgroundColor: const Color(0xFFEFE6D6),
+        // 5 sekmede etiketler tek satıra sığsın
+        navigationBarTheme: const NavigationBarThemeData(
+          labelTextStyle: WidgetStatePropertyAll(
+              TextStyle(fontSize: 12, fontWeight: FontWeight.w500, overflow: TextOverflow.ellipsis)),
+        ),
       ),
       home: const _Home(),
     );
@@ -100,7 +105,7 @@ class _HomeState extends State<_Home> {
               label: Text('$doneCount'),
               child: const Icon(Icons.emoji_events_outlined),
             ),
-            label: 'Tamamlanan',
+            label: 'Bitenler',
           )),
       ('history', 'Geçmiş', HistoryScreen(key: const ValueKey('history'), store: store),
           NavigationDestination(
