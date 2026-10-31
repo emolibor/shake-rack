@@ -193,4 +193,29 @@ void main() {
       expect(b.projects.template, ['Mimari Proje', 'Statik Proje']);
     });
   });
+
+  group('Sekme sırası', () {
+    test('sürükle-bırak sırası uygulanır ve kayıttan geri gelir', () async {
+      final a = RackStore();
+      final reels = a.addBoard('Reels', ['Instagram']);
+      final notes = a.addBoard('Notlar', const [], kind: BoardKind.notes);
+      expect(a.boards.map((b) => b.name), ['Projeler', 'Reels', 'Notlar']);
+
+      a.reorderBoards(2, 0); // Notlar en başa
+      expect(a.boards.map((b) => b.name), ['Notlar', 'Projeler', 'Reels']);
+      a.reorderBoards(1, 3); // Projeler en sona
+      expect(a.boards.map((b) => b.name), ['Notlar', 'Reels', 'Projeler']);
+
+      // sonradan eklenen sona gelir
+      a.addBoard('Fikirler', ['A']);
+      expect(a.boards.last.name, 'Fikirler');
+
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final b = RackStore();
+      await b.load();
+      expect(b.boards.map((x) => x.name), ['Notlar', 'Reels', 'Projeler', 'Fikirler']);
+      expect(reels.id, isNotEmpty);
+      expect(notes.id, isNotEmpty);
+    });
+  });
 }

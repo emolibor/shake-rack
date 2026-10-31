@@ -17,6 +17,7 @@ class RackStore extends ChangeNotifier {
   static const _kCards = 'cards_v1'; // Projeler askılığının kartları
   static const _kCustom = 'custom_boards_v1'; // özel askılıklar (yerel)
   static const _kProjectTypes = 'project_types_v1'; // Projeler maddeleri
+  static const _kBoardOrder = 'board_order_v1'; // sekme sırası (bu telefona özel)
   static const _kMembers = 'members_v1';
   static const _kCurrent = 'current_member_v1';
   static const _kRackCode = 'rack_code_v1';
@@ -32,8 +33,30 @@ class RackStore extends ChangeNotifier {
   List<Member> members = List.of(kDefaultMembers);
   String currentMemberId = 'me';
 
-  /// Sekme sırası: Projeler + özel askılıklar.
-  List<Board> get boards => [projects, ...custom];
+  /// Sekme sırası (id listesi). Listede olmayanlar sona eklenir.
+  List<String> boardOrder = [];
+
+  /// Sekmeler, kullanıcının sürükleyerek verdiği sırayla.
+  List<Board> get boards {
+    final all = [projects, ...custom];
+    final rank = <String, int>{
+      for (var k = 0; k < all.length; k++)
+        all[k].id: boardOrder.contains(all[k].id)
+            ? boardOrder.indexOf(all[k].id)
+            : boardOrder.length + k,
+    };
+    return all..sort((a, b) => rank[a.id]!.compareTo(rank[b.id]!));
+  }
+
+  /// Sekmeyi sürükleyip bıraktı: yeni sırayı kaydet.
+  void reorderBoards(int oldIndex, int newIndex) {
+    final list = boards;
+    if (newIndex > oldIndex) newIndex -= 1;
+    list.insert(newIndex, list.removeAt(oldIndex));
+    boardOrder = list.map((b) => b.id).toList();
+    notifyListeners();
+    _saveLocal();
+  }
   Board? boardById(String id) =>
       boards.cast<Board?>().firstWhere((b) => b!.id == id, orElse: () => null);
 
@@ -71,6 +94,7 @@ class RackStore extends ChangeNotifier {
       projects.cards =
           (jsonDecode(c) as List).map((e) => CompanyCard.fromJson(e)).toList();
     }
+    boardOrder = p.getStringList(_kBoardOrder) ?? [];
     final pt = p.getStringList(_kProjectTypes);
     if (pt != null && pt.isNotEmpty) projects.template = pt;
     final cb = p.getString(_kCustom);
@@ -115,6 +139,7 @@ class RackStore extends ChangeNotifier {
     await p.setString(
         _kCards, jsonEncode(projects.cards.map((e) => e.toJson()).toList()));
     await p.setStringList(_kProjectTypes, projects.template);
+    await p.setStringList(_kBoardOrder, boardOrder);
     await p.setString(
         _kCustom, jsonEncode(custom.map((e) => e.toJson()).toList()));
     await p.setString(

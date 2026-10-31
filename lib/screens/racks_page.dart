@@ -37,6 +37,7 @@ class _RacksPageState extends State<RacksPage> {
               selectedId: board.id,
               onSelect: (b) => setState(() => _selected = b.id),
               onEdit: (b) => BoardEditScreen.edit(context, store, b),
+              onReorder: store.reorderBoards,
               onAdd: _create,
             ),
             Expanded(
@@ -58,6 +59,7 @@ class _HangerTabs extends StatelessWidget {
   final String selectedId;
   final void Function(Board) onSelect;
   final void Function(Board) onEdit;
+  final void Function(int oldIndex, int newIndex) onReorder;
   final VoidCallback onAdd;
 
   const _HangerTabs({
@@ -65,10 +67,14 @@ class _HangerTabs extends StatelessWidget {
     required this.selectedId,
     required this.onSelect,
     required this.onEdit,
+    required this.onReorder,
     required this.onAdd,
   });
 
   static const _brown = Color(0xFF8B6A3E);
+
+  /// Sürüklemenin başladığı sekme (bırakınca yer değişti mi anlamak için).
+  static int? _dragStart;
 
   @override
   Widget build(BuildContext context) {
@@ -78,21 +84,61 @@ class _HangerTabs extends StatelessWidget {
         color: Color(0xFFE6D9C2),
         border: Border(bottom: BorderSide(color: Color(0xFFD2C1A3))),
       ),
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Row(
         children: [
-          for (final b in boards)
-            _tab(
-              label: b.name,
-              selected: b.id == selectedId,
-              locked: b.isPrivate,
-              count: b.active.length,
-              onTap: () => onSelect(b),
-              notes: b.isNotes,
-              onLongPress: () => onEdit(b),
+          // Uzun bas + sürükle → yer değiştir. Uzun bas + kaydırmadan bırak → düzenle.
+          Expanded(
+            child: ReorderableListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(10, 8, 2, 8),
+              buildDefaultDragHandles: false,
+              proxyDecorator: (child, i, anim) => AnimatedBuilder(
+                animation: anim,
+                builder: (_, c) => Transform.rotate(
+                  angle: -0.06 * anim.value,
+                  child: Transform.scale(
+                    scale: 1 + 0.08 * anim.value,
+                    child: Material(color: Colors.transparent, child: c),
+                  ),
+                ),
+                child: child,
+              ),
+              onReorderStart: (i) => _dragStart = i,
+              onReorderEnd: (i) {
+                final s = _dragStart;
+                _dragStart = null;
+                // yerinden oynamadan bırakıldıysa: düzenleme aç
+                if (s != null && (i == s || i == s + 1)) {
+                  final b = boards[s];
+                  WidgetsBinding.instance
+                      .addPostFrameCallback((_) => onEdit(b));
+                }
+              },
+              onReorder: (o, n) {
+                if (n == o || n == o + 1) return; // yer değişmedi
+                onReorder(o, n);
+              },
+              children: [
+                for (var i = 0; i < boards.length; i++)
+                  ReorderableDelayedDragStartListener(
+                    key: ValueKey(boards[i].id),
+                    index: i,
+                    child: _tab(
+                      label: boards[i].name,
+                      selected: boards[i].id == selectedId,
+                      locked: boards[i].isPrivate,
+                      count: boards[i].active.length,
+                      notes: boards[i].isNotes,
+                      onTap: () => onSelect(boards[i]),
+                    ),
+                  ),
+              ],
             ),
-          _tab(label: 'Yeni', selected: false, add: true, onTap: onAdd),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(0, 8, 10, 8),
+            child: _tab(label: 'Yeni', selected: false, add: true, onTap: onAdd),
+          ),
         ],
       ),
     );
