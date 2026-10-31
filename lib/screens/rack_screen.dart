@@ -159,7 +159,7 @@ class _RackScreenState extends State<RackScreen> {
             final cards = board.active;
             return Column(
               children: [
-                if (!board.isProjects) _StatusBand(board: board, store: store),
+                if (!board.isProjects || board.isShared) _StatusBand(board: board, store: store),
                 const SizedBox(height: 8),
                 SizedBox(
                   height: 28,

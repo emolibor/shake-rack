@@ -125,7 +125,7 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
 
   Future<void> _delete() async {
     final b = widget.board!;
-    final synced = widget.store.syncing;
+    final synced = widget.store.rackCode.isNotEmpty;
     final String body;
     if (b.isProjects) {
       body = synced
@@ -179,7 +179,7 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
       appBar: AppBar(
         title: Text(title),
         actions: [
-          if (!_isNew && !_isProjects)
+          if (!_isNew)
             IconButton(
               tooltip: 'Paylaş',
               icon: Icon(widget.board!.isShared ? Icons.people_alt : Icons.ios_share),
@@ -197,9 +197,11 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
         children: [
           _isProjects
               ? _info(Icons.groups_outlined,
-                  'Ekip projeleri askılığı: ekip koduna bağlıysan adı ve maddeleri ekipte herkeste değişir. '
-                  'Bir maddenin adını değiştirirsen mevcut kartlardaki adı da değişir, tikler korunur. '
-                  'Proje işin yoksa sağ üstten silebilirsin.')
+                  (widget.board?.isShared ?? false)
+                      ? 'Bu askılık paylaşılıyor; adı ve proje türleri paylaştığın herkeste değişir. '
+                          'Bir maddenin adını değiştirirsen mevcut kartlardaki adı da değişir, tikler korunur.'
+                      : 'Firmadakilerle paylaşmak için sağ üstteki paylaş simgesine dokun. '
+                          'Bir maddenin adını değiştirirsen mevcut kartlardaki adı da değişir, tikler korunur.')
               : (widget.board?.isShared ?? false)
                   ? _info(Icons.people_alt_outlined,
                       'Bu askılık ${widget.board!.shareCodePretty} koduyla paylaşılıyor. '
@@ -208,7 +210,7 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
                       'Özel askılık sadece bu telefonda tutulur. Sağ üstteki paylaş '
                       'simgesiyle istediğin kişiyle paylaşabilirsin.'),
           const SizedBox(height: 16),
-          if (_isNew && widget.store.projectsHidden) ...[
+          if (_isNew && widget.store.projectsHidden && widget.store.projectsEverUsed) ...[
             Card(
               margin: EdgeInsets.zero,
               color: const Color(0xFFFFF8E7),

@@ -249,7 +249,13 @@ Future<Board?> showJoinSheet(BuildContext context, RackStore store) {
       final canEdit = d?['permission'] != 'view';
       final allowCopy = d?['allowCopy'] == true;
       final isNotes = d?['kind'] == 'notes';
-      final count = (d?['cards'] as List?)?.length ?? 0;
+      final isProj = d?['kind'] == 'projects';
+      final count = ((d?['cards'] as List?) ?? const [])
+          .where((c) => c is Map && c['deleted'] != true)
+          .length;
+      final replaces = isProj &&
+          store.rackCode != d?['_doc'] &&
+          store.projects.live.isNotEmpty;
 
       return _sheetFrame(ctx, [
         Text('Kodla katıl', style: Theme.of(ctx).textTheme.titleLarge),
@@ -294,15 +300,29 @@ Future<Board?> showJoinSheet(BuildContext context, RackStore store) {
             margin: EdgeInsets.zero,
             color: const Color(0xFFFFF8E7),
             child: ListTile(
-              leading: Icon(isNotes ? Icons.sticky_note_2_outlined : Icons.checkroom),
+              leading: Icon(isProj
+                  ? Icons.groups_outlined
+                  : isNotes
+                      ? Icons.sticky_note_2_outlined
+                      : Icons.checkroom),
               title: Text('${d['name']}',
                   style: const TextStyle(fontWeight: FontWeight.w700)),
               subtitle: Text(
-                  '${d['ownerName'] ?? 'Biri'} paylaştı · $count ${isNotes ? 'not' : 'kart'}\n'
+                  '${d['ownerName'] ?? 'Biri'} paylaştı · $count ${isProj ? 'firma' : isNotes ? 'not' : 'kart'}\n'
                   '${canEdit ? 'Düzenleyebilirsin' : 'Sadece inceleyebilirsin'}'),
               isThreeLine: true,
             ),
           ),
+          if (replaces)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                'Dikkat: Bu telefondaki "${store.projects.name}" askılığının yerini alır '
+                '(${store.projects.live.length} firma). Onları korumak istersen önce '
+                '"Kopyasını al" seç ya da paylaşanla birleştirin.',
+                style: const TextStyle(color: Colors.deepOrange, fontSize: 12.5),
+              ),
+            ),
           const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: () async {

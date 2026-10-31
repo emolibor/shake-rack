@@ -104,7 +104,7 @@ class _CardEditScreenState extends State<CardEditScreen> {
         content: Text((board.isNotes
                 ? 'Bu not ipten alınacak.'
                 : '${widget.card!.name} ipten alınacak.') +
-            ((board.isShared || (board.isProjects && widget.store.syncing))
+            ((board.isShared || (board.isProjects && widget.store.rackCode.isNotEmpty))
                 ? '\n\nAskılık sahibi Geçmiş sekmesinden geri yükleyebilir.'
                 : '')),
         actions: [

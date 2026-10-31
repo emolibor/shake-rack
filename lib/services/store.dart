@@ -30,6 +30,9 @@ class RackStore extends ChangeNotifier {
   static const _kProjectsOwner = 'projects_owner_v1';
   static const _kProjectsLog = 'projects_log_v1';
   static const _kHistorySeen = 'history_seen_v1';
+  static const _kProjectsUsed = 'projects_used_v1';
+  static const _kProjectsPerm = 'projects_perm_v1';
+  static const _kProjectsCopy = 'projects_copy_v1';
 
   final _uuid = const Uuid();
 
@@ -47,13 +50,21 @@ class RackStore extends ChangeNotifier {
   /// Projeler askılığı bu telefonda kaldırıldı mı (proje işi olmayanlar için).
   bool projectsHidden = false;
 
+  /// Bu telefonda Projeler daha önce kullanıldı mı (yeni kurulumda hayır →
+  /// "Ekip projeleri" seçeneği ve Mesaj sekmesi gösterilmez).
+  bool projectsEverUsed = false;
+
+  /// Projeler paylaşımının izinleri (sahip belirler, belgeden okunur).
+  String projectsPermission = 'edit';
+  bool projectsAllowCopy = true;
+
   /// Proje kodunun sahibi (profil kimliği). Sadece sahip askılığı yönetir:
   /// adını, proje türlerini, ekip kullanıcılarını değiştirir, silinenleri geri yükler.
   String? projectsOwner;
 
   /// Kod yoksa (yalnız kullanım) ya da sahip belirlenmemişse herkes yönetir.
   bool get canManageProjects =>
-      !syncing || projectsOwner == null || projectsOwner == profile.id;
+      rackCode.isEmpty || projectsOwner == null || projectsOwner == profile.id;
 
   /// Projeler askılığının işlem geçmişi (ekip koduyla eşitlenir).
   List<Activity> projectsLog = [];
@@ -154,7 +165,14 @@ class RackStore extends ChangeNotifier {
           (jsonDecode(c) as List).map((e) => CompanyCard.fromJson(e)).toList();
     }
     boardOrder = p.getStringList(_kBoardOrder) ?? [];
-    projectsHidden = p.getBool(_kProjectsHidden) ?? false;
+    // Yeni kurulum: hiç veri yok → Projeler gizli başlar (sıradan kullanıcı).
+    final fresh = !p.containsKey(_kCards) &&
+        !p.containsKey(_kRackCode) &&
+        !p.containsKey(_kProjectsHidden);
+    projectsHidden = p.getBool(_kProjectsHidden) ?? fresh;
+    projectsEverUsed = p.getBool(_kProjectsUsed) ?? !fresh;
+    projectsPermission = p.getString(_kProjectsPerm) ?? 'edit';
+    projectsAllowCopy = p.getBool(_kProjectsCopy) ?? true;
     projects.name = p.getString(_kProjectsName) ?? projects.name;
     projectsOwner = p.getString(_kProjectsOwner);
     historySeenAt = DateTime.tryParse(p.getString(_kHistorySeen) ?? '') ?? historySeenAt;
@@ -194,7 +212,8 @@ class RackStore extends ChangeNotifier {
       deviceId = _uuid.v4();
       await p.setString(_kDeviceId, deviceId);
     }
-    if (renamed) await _saveLocal();
+    _syncProjectsShareState();
+    if (renamed || fresh) await _saveLocal();
     notifyListeners();
     if (rackCode.isNotEmpty) _listen();
     for (final b in custom) {
@@ -223,6 +242,9 @@ class RackStore extends ChangeNotifier {
     await p.setStringList(_kProjectTypes, projects.template);
     await p.setStringList(_kBoardOrder, boardOrder);
     await p.setBool(_kProjectsHidden, projectsHidden);
+    await p.setBool(_kProjectsUsed, projectsEverUsed);
+    await p.setString(_kProjectsPerm, projectsPermission);
+    await p.setBool(_kProjectsCopy, projectsAllowCopy);
     await p.setString(_kProjectsName, projects.name);
     if (projectsOwner == null) {
       await p.remove(_kProjectsOwner);
@@ -301,17 +323,19 @@ class RackStore extends ChangeNotifier {
     notifyListeners();
     _sub = _doc.snapshots().listen((snap) async {
       if (!snap.exists) {
-        // Kod ilk kez kullanılıyor → yereldeki veriyi buluta taşı; oluşturan sahip olur.
-        projectsOwner = profile.id;
-        await _doc.set({..._toCloud(), 'owner': profile.id, 'ownerName': profile.name});
-        syncStatus = 'Eşitlendi';
-        notifyListeners();
+        // Önbellekte yoksa sunucuyu bekle; sunucuda yoksa paylaşım kapatılmış.
+        if (snap.metadata.isFromCache) return;
+        await _detachProjects();
         return;
       }
       final d = snap.data()!;
-      // sahip ve geçmiş her zaman okunur (geçmiş başkasının ekleyişiyle değişir)
+      // sahip, izinler, kişiler ve geçmiş her zaman okunur
       projectsOwner = d['owner'] as String?;
+      projectsPermission = d['permission'] == 'view' ? 'view' : 'edit';
+      projectsAllowCopy = d['allowCopy'] ?? true;
       projectsLog = _parseLog(d['log']);
+      _absorbMembers(projects, d['people']);
+      _syncProjectsShareState();
       _trimLog(_doc, projectsLog, isOwner: projectsOwner == profile.id);
       // Kendi yazdığımız sürümü geri okuma; diğer telefonun yazdığını uygula.
       // Bizim gönderilmeyi bekleyen değişikliğimiz varsa onu ezme.
@@ -382,7 +406,11 @@ class RackStore extends ChangeNotifier {
   /// Askılığı sil. Paylaşan sahipse paylaşım da kapanır; alıcıysa sadece
   /// kendi telefonundan çıkar.
   Future<void> deleteBoard(Board b) async {
-    if (b.isProjects) return hideProjects();
+    if (b.isProjects) {
+      final r = projects.role;
+      if (r == ShareRole.editor || r == ShareRole.viewer) return leaveProjects();
+      return hideProjects();
+    }
     if (b.isShared && b.role == ShareRole.owner) await stopSharing(b);
     if (b.isShared && b.role != ShareRole.owner) await _leaveMembers(b);
     _unlistenShared(b);
@@ -420,6 +448,7 @@ class RackStore extends ChangeNotifier {
     if (!firebaseReady) {
       throw StateError('Paylaşım için internet / Firebase gerekli.');
     }
+    if (b.isProjects) return _shareProjects(canEdit: canEdit, allowCopy: allowCopy);
     b.shareCode ??= newShareCode();
     b.role = ShareRole.owner;
     b.shareCanEdit = canEdit;
@@ -444,6 +473,7 @@ class RackStore extends ChangeNotifier {
 
   /// Paylaşımı kapat (sahip). Alıcılarda askılık yerel kopyaya dönüşür.
   Future<void> stopSharing(Board b) async {
+    if (b.isProjects) return _stopSharingProjects();
     final code = b.shareCode;
     if (code == null) return;
     _unlistenShared(b);
@@ -461,14 +491,35 @@ class RackStore extends ChangeNotifier {
   /// Kodla paylaşılan askılığın içeriğini getir (önizleme). Yoksa null.
   Future<Map<String, dynamic>?> fetchShared(String rawCode) async {
     final code = normalizeCode(rawCode);
-    if (code.length != 8) return null;
-    final snap = await _shareDoc(code).get();
-    if (!snap.exists) return null;
-    return {...snap.data()!, 'code': code};
+    if (code.length == 8) return _fetchDoc('share_${code.toLowerCase()}', code);
+    // eski tip ekip kodu (ör. "fourmis-proje")
+    final legacy = _rackId(rawCode);
+    if (legacy.length < 6) return null;
+    return _fetchDoc(legacy, legacy);
   }
+
+  static String _rackId(String s) =>
+      s.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9\-_]'), '-');
+
+  Future<Map<String, dynamic>?> _fetchDoc(String docId, String code) async {
+    final snap =
+        await FirebaseFirestore.instance.collection('racks').doc(docId).get();
+    if (!snap.exists) return null;
+    final d = {...snap.data()!, 'code': code, '_doc': docId};
+    if (isProjectsData(d)) {
+      d['name'] ??= d['projectsName'] ?? 'Projeler';
+      d['kind'] = 'projects';
+    }
+    return d;
+  }
+
+  /// Paylaşım belgesi bir Projeler askılığı mı?
+  static bool isProjectsData(Map d) =>
+      d['kind'] == 'projects' || d.containsKey('projectTypes');
 
   /// Paylaşılan askılığa canlı bağlan (izne göre düzenleyici / izleyici).
   Board joinShared(Map<String, dynamic> data) {
+    if (isProjectsData(data)) return joinProjects(data);
     final code = data['code'] as String;
     final existing = custom.cast<Board?>()
         .firstWhere((x) => x!.shareCode == code, orElse: () => null);
@@ -494,6 +545,14 @@ class RackStore extends ChangeNotifier {
 
   /// Paylaşılan askılığın bağımsız kopyasını kendi askılıklarına ekle.
   Board copyShared(Map<String, dynamic> data, {String? name}) {
+    if (isProjectsData(data)) {
+      data = {
+        ...data,
+        'name': data['projectsName'] ?? data['name'] ?? 'Projeler',
+        'template': data['projectTypes'] ?? kProjectTypes,
+        'kind': 'items',
+      };
+    }
     final b = Board.fromShare(data)..store = this;
     if (name != null) b.name = name;
     b.cards.removeWhere((c) => c.deleted);
@@ -605,7 +664,7 @@ class RackStore extends ChangeNotifier {
   /// içeriği de temizlenir; bağlıysa ekibin verisine dokunulmaz.
   Future<void> hideProjects() async {
     projectsHidden = true;
-    if (!syncing) {
+    if (rackCode.isEmpty) {
       projects.cards = [];
       projects.template = List.of(kProjectTypes);
       projects.name = 'Projeler';
@@ -621,6 +680,147 @@ class RackStore extends ChangeNotifier {
     notifyListeners();
     _saveLocal();
     return projects;
+  }
+
+  // ---------- Projeler'i paylaşma (diğer askılıklar gibi) ----------
+  // Yeni paylaşımlar racks/share_<kod> belgesinde durur. Eski tip ekip kodu
+  // (ör. "fourmis-proje") aynı şekilde çalışmaya devam eder.
+
+  /// Projeler askılığının paylaşım bilgilerini (kod, rol, izin) güncel tut.
+  void _syncProjectsShareState() {
+    if (rackCode.isEmpty) {
+      projects.shareCode = null;
+      projects.role = null;
+      projects.people = {};
+      return;
+    }
+    projects.shareCode = rackCode.startsWith('share_')
+        ? rackCode.substring(6).toUpperCase()
+        : rackCode;
+    projects.shareCanEdit = projectsPermission != 'view';
+    projects.allowCopy = projectsAllowCopy;
+    projects.role = projectsOwner == null
+        ? null // sahipsiz eski kod: herkes yönetebilir
+        : projectsOwner == profile.id
+            ? ShareRole.owner
+            : (projects.shareCanEdit ? ShareRole.editor : ShareRole.viewer);
+  }
+
+  Future<String> _shareProjects(
+      {required bool canEdit, required bool allowCopy}) async {
+    projectsPermission = canEdit ? 'edit' : 'view';
+    projectsAllowCopy = allowCopy;
+    if (rackCode.isEmpty) {
+      final code = newShareCode();
+      rackCode = 'share_${code.toLowerCase()}';
+      projectsOwner = profile.id;
+      projectsLog = [];
+      await _doc.set({
+        ..._toCloud(),
+        'kind': 'projects',
+        'owner': profile.id,
+        'ownerName': hasProfile ? profile.name : me.name,
+        'permission': projectsPermission,
+        'allowCopy': allowCopy,
+        'people': {profile.id: _meEntry(ShareRole.owner)},
+      });
+    } else {
+      // zaten paylaşılıyor (eski kod dahil): izinleri güncelle, sahipsizse sahiplen
+      projectsOwner ??= profile.id;
+      await _doc.set({
+        'kind': 'projects',
+        'permission': projectsPermission,
+        'allowCopy': allowCopy,
+        'owner': projectsOwner,
+        'people': {profile.id: _meEntry(ShareRole.owner)},
+      }, SetOptions(merge: true));
+    }
+    projectsEverUsed = true;
+    _syncProjectsShareState();
+    _listen();
+    notifyListeners();
+    await _saveLocal();
+    return projects.shareCode!;
+  }
+
+  /// Sahip Projeler paylaşımını kapatır: kartlar sende kalır, diğerlerinde
+  /// kendi kopyası olarak kalır.
+  Future<void> _stopSharingProjects() async {
+    if (rackCode.isEmpty) return;
+    final doc = _doc;
+    _sub?.cancel();
+    _sub = null;
+    try {
+      await doc.delete();
+    } catch (_) {}
+    rackCode = '';
+    projectsOwner = null;
+    projectsLog = [];
+    _syncProjectsShareState();
+    syncStatus = 'Yerel';
+    notifyListeners();
+    await _saveLocal();
+  }
+
+  /// Paylaşım sunucuda kapatıldı → bu telefonda yerel olarak devam et.
+  Future<void> _detachProjects() async {
+    _sub?.cancel();
+    _sub = null;
+    rackCode = '';
+    projectsOwner = null;
+    _syncProjectsShareState();
+    syncStatus = 'Yerel';
+    notifyListeners();
+    await _saveLocal();
+  }
+
+  /// Paylaşılan Projeler askılığına katıl. Bu telefondaki Projeler'in yerini alır.
+  Board joinProjects(Map<String, dynamic> d) {
+    _sub?.cancel();
+    rackCode = '${d['_doc'] ?? d['code']}';
+    projectsOwner = d['owner'] as String?;
+    projectsPermission = d['permission'] == 'view' ? 'view' : 'edit';
+    projectsAllowCopy = d['allowCopy'] ?? true;
+    projectsHidden = false;
+    projectsEverUsed = true;
+    _applyCloud(d);
+    projectsLog = _parseLog(d['log']);
+    _absorbMembers(projects, d['people']);
+    _syncProjectsShareState();
+    if (memberById(currentMemberId) == null) currentMemberId = members.first.id;
+    final myRole = projects.role ?? ShareRole.editor;
+    projects.people[profile.id] = myRole.name;
+    if (firebaseReady) {
+      _doc.set({'people': {profile.id: _meEntry(myRole)}}, SetOptions(merge: true))
+          .catchError((_) {});
+    }
+    _listen();
+    notifyListeners();
+    _saveLocal();
+    return projects;
+  }
+
+  /// Katıldığın Projeler'den ayrıl: bu telefondan kaldırılır, paylaşana dokunulmaz.
+  Future<void> leaveProjects() async {
+    if (firebaseReady && rackCode.isNotEmpty) {
+      try {
+        await _doc.update({'people.${profile.id}': FieldValue.delete()});
+      } catch (_) {}
+    }
+    _sub?.cancel();
+    _sub = null;
+    rackCode = '';
+    projectsOwner = null;
+    projectsLog = [];
+    projects.cards = [];
+    projects.template = List.of(kProjectTypes);
+    projects.name = 'Projeler';
+    _syncProjectsShareState();
+    syncStatus = 'Yerel';
+    projectsHidden = true;
+    boardOrder.remove(projects.id);
+    notifyListeners();
+    await _saveLocal();
   }
 
   // ---------- profil ve arkadaşlar ----------
@@ -648,6 +848,11 @@ class RackStore extends ChangeNotifier {
         await _shareDoc(b.shareCode!)
             .set({'members': {profile.id: _meEntry(role)}}, SetOptions(merge: true));
       }
+      if (rackCode.isNotEmpty) {
+        await _doc.set({
+          'people': {profile.id: _meEntry(projects.role ?? ShareRole.editor)}
+        }, SetOptions(merge: true));
+      }
     } catch (_) {}
   }
 
@@ -662,12 +867,21 @@ class RackStore extends ChangeNotifier {
         if (inv is! Map) continue;
         final code = '${inv['code'] ?? ''}';
         if (code.isEmpty || _joiningInvites.contains(code)) continue;
+        final docId = '${inv['doc'] ?? 'share_${code.toLowerCase()}'}';
         _joiningInvites.add(code);
         try {
-          final already = custom.any((b) => b.shareCode == code);
+          final already =
+              custom.any((b) => b.shareCode == code) || rackCode == docId;
           if (!already) {
-            final data = await fetchShared(code);
-            if (data != null) joinShared(data);
+            final data = await _fetchDoc(docId, code);
+            if (data != null) {
+              if (!isProjectsData(data)) {
+                joinShared(data);
+              } else if (rackCode.isEmpty && projects.live.isEmpty) {
+                // kendi proje verisi olmayan telefonda Projeler'e otomatik katıl
+                joinProjects(data);
+              }
+            }
           }
           await _profileDoc(profile.id)
               .update({'inbox': FieldValue.arrayRemove([inv])});
@@ -688,6 +902,7 @@ class RackStore extends ChangeNotifier {
       'inbox': FieldValue.arrayUnion([
         {
           'code': b.shareCode,
+          'doc': b.isProjects ? rackCode : 'share_${b.shareCode!.toLowerCase()}',
           'from': profile.id,
           'fromName': profile.name,
           'board': b.name,
@@ -771,7 +986,7 @@ class RackStore extends ChangeNotifier {
 
   /// Ortak askılıkta yapılan işlemi geçmişe yaz (yalnız/kodsuz askılıklarda yazılmaz).
   void logActivity(Board b, String action, CompanyCard card, String item) {
-    final shared = b.isProjects ? syncing : b.isShared;
+    final shared = b.isProjects ? rackCode.isNotEmpty : b.isShared;
     if (!shared) return;
     final a = Activity(
       id: _uuid.v4(),
@@ -832,6 +1047,7 @@ class RackStore extends ChangeNotifier {
     });
     if (ok) {
       projectsOwner = profile.id;
+      _syncProjectsShareState();
       notifyListeners();
       await _saveLocal();
     }

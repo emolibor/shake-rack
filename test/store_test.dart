@@ -486,4 +486,111 @@ void main() {
       expect(s.unseenActivities, 0);
     });
   });
+
+  group('Yeni kurulum ve Projeler paylaşımı', () {
+    Map<String, dynamic> projectsDoc({String perm = 'edit', String owner = 'p-owner'}) => {
+          'kind': 'projects',
+          'code': 'K7P2QX9M',
+          '_doc': 'share_k7p2qx9m',
+          'owner': owner,
+          'ownerName': 'Emirhan',
+          'permission': perm,
+          'allowCopy': true,
+          'projectsName': 'Fourmis Projeler',
+          'projectTypes': ['Mimari Proje', 'Elektrik Projesi'],
+          'members': [
+            {'id': 'me', 'name': 'Kullanıcı 1', 'color': 0xFF2E7DE0},
+            {'id': 'friend', 'name': 'Kullanıcı 2', 'color': 0xFF2EA35A},
+          ],
+          'cards': [
+            {
+              'id': 'c1', 'name': 'Atilla Tekstil', 'createdAt': '2026-10-31T10:00:00.000',
+              'items': [
+                {'type': 'Mimari Proje', 'done': true, 'doneBy': 'me'},
+                {'type': 'Elektrik Projesi', 'done': false},
+              ],
+            },
+          ],
+          'people': {
+            'p-owner': {'name': 'Emirhan', 'color': 0xFF8B6A3E, 'role': 'owner'},
+          },
+        };
+
+    test('yeni kurulumda Projeler yok, Mesaj/ekip seçeneği yok', () async {
+      final s = RackStore();
+      await s.load();
+      expect(s.projectsHidden, isTrue);
+      expect(s.projectsEverUsed, isFalse);
+      expect(s.boards, isEmpty);
+    });
+
+    test('eski kullanıcıda Projeler olduğu gibi kalır', () async {
+      SharedPreferences.setMockInitialValues({'cards_v1': '[]', 'rack_code_v1': 'fourmis-proje'});
+      final s = RackStore();
+      await s.load();
+      expect(s.projectsHidden, isFalse);
+      expect(s.projectsEverUsed, isTrue);
+      // eski kod: kod olarak görünür, sahipsizken herkes yönetebilir
+      expect(s.projects.isShared, isTrue);
+      expect(s.projects.shareCodePretty, 'fourmis-proje');
+      expect(s.projects.role, isNull);
+    });
+
+    test('paylaşım belgesi Projeler olarak tanınır (eski kod dahil)', () {
+      expect(RackStore.isProjectsData(projectsDoc()), isTrue);
+      expect(RackStore.isProjectsData({'projectTypes': [], 'cards': []}), isTrue);
+      expect(RackStore.isProjectsData({'kind': 'notes'}), isFalse);
+    });
+
+    test('kodla Projeler\'e katılma: düzenleyici', () async {
+      final s = RackStore()
+        ..profile = const Member(id: 'p-guest', name: 'Mert', color: Color(0xFF14A3A3));
+      await s.hideProjects(); // yeni kullanıcı gibi
+      final b = s.joinShared(projectsDoc()); // dispatch → joinProjects
+      expect(b, same(s.projects));
+      expect(s.projectsHidden, isFalse);
+      expect(s.rackCode, 'share_k7p2qx9m');
+      expect(s.projects.name, 'Fourmis Projeler');
+      expect(s.projects.live.single.name, 'Atilla Tekstil');
+      expect(s.projects.role, ShareRole.editor);
+      expect(s.projects.canEdit, isTrue);
+      expect(s.projects.canManage, isFalse); // sahip değil
+      expect(s.friends['p-owner']!.name, 'Emirhan');
+      expect(s.projects.people['p-guest'], 'editor');
+      // sahip olmayan proje türlerini / ekibi değiştiremez
+      s.updateBoard(s.projects, name: 'Benim', template: ['X']);
+      expect(s.projects.name, 'Fourmis Projeler');
+      expect(s.addMember(), isNull);
+    });
+
+    test('sadece inceleme izniyle Projeler kilitli', () async {
+      final s = RackStore()
+        ..profile = const Member(id: 'p-guest', name: 'Mert', color: Color(0xFF14A3A3));
+      s.joinProjects(projectsDoc(perm: 'view'));
+      expect(s.projects.role, ShareRole.viewer);
+      expect(s.projects.canEdit, isFalse);
+    });
+
+    test('ayrılınca bu telefondan temizlenir', () async {
+      final s = RackStore()
+        ..profile = const Member(id: 'p-guest', name: 'Mert', color: Color(0xFF14A3A3));
+      s.joinProjects(projectsDoc());
+      await s.deleteBoard(s.projects); // alıcı → ayrıl
+      expect(s.rackCode, isEmpty);
+      expect(s.projectsHidden, isTrue);
+      expect(s.projects.cards, isEmpty);
+      expect(s.projects.isShared, isFalse);
+    });
+
+    test('Projeler kopyası bağımsız maddeli askılık olur', () {
+      final s = RackStore();
+      final c = s.copyShared(projectsDoc());
+      expect(c.isProjects, isFalse);
+      expect(c.isNotes, isFalse);
+      expect(c.name, 'Fourmis Projeler');
+      expect(c.template, ['Mimari Proje', 'Elektrik Projesi']);
+      expect(c.cards.single.items.first.done, isTrue);
+      expect(s.projects.cards, isEmpty); // kendi Projeler'ine dokunulmaz
+    });
+  });
 }

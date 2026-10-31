@@ -139,112 +139,11 @@ class TeamScreen extends StatelessWidget {
             icon: const Icon(Icons.person_add_alt_1),
             label: const Text('Kullanıcı ekle'),
           ),
-          const SizedBox(height: 12),
-          _SyncCard(store: store),
           ],
           const SizedBox(height: 22),
           const Divider(),
           const _VersionCard(),
         ],
-      ),
-    );
-  }
-}
-
-/// Askılık kodu: iki telefon aynı kodu girince aynı ipi görür.
-class _SyncCard extends StatefulWidget {
-  final RackStore store;
-  const _SyncCard({required this.store});
-  @override
-  State<_SyncCard> createState() => _SyncCardState();
-}
-
-class _SyncCardState extends State<_SyncCard> {
-  late final TextEditingController _ctrl =
-      TextEditingController(text: widget.store.rackCode);
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final s = widget.store;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(s.syncing ? Icons.cloud_done_outlined : Icons.cloud_off_outlined),
-                const SizedBox(width: 8),
-                const Text('Ortak askılık',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-                const Spacer(),
-                Text(s.syncStatus,
-                    style: const TextStyle(fontSize: 12, color: Colors.black54)),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'İkiniz de aynı kodu girin; kartlar, tikler ve sıra iki telefonda canlı eşitlenir.',
-              style: TextStyle(fontSize: 13, color: Colors.black54),
-            ),
-            if (!s.firebaseReady)
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: Text(
-                  'Firebase kurulu değil — README\'deki "flutterfire configure" adımını yap.',
-                  style: TextStyle(fontSize: 12, color: Colors.redAccent),
-                ),
-              ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _ctrl,
-              enabled: s.firebaseReady,
-              decoration: const InputDecoration(
-                labelText: 'Askılık kodu',
-                hintText: 'fourmis-proje',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                FilledButton.icon(
-                  onPressed: s.firebaseReady
-                      ? () async {
-                          await s.setRackCode(_ctrl.text);
-                          _ctrl.text = s.rackCode;
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                content: Text(s.rackCode.isEmpty
-                                    ? 'Yerel moda geçildi'
-                                    : '"${s.rackCode}" askılığına bağlanıldı')));
-                          }
-                        }
-                      : null,
-                  icon: const Icon(Icons.link),
-                  label: const Text('Bağlan'),
-                ),
-                const SizedBox(width: 8),
-                if (s.rackCode.isNotEmpty)
-                  TextButton(
-                    onPressed: () async {
-                      await s.setRackCode('');
-                      _ctrl.clear();
-                    },
-                    child: const Text('Ayrıl'),
-                  ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -405,7 +304,7 @@ class _OwnerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!store.syncing) return const SizedBox.shrink();
+    if (store.rackCode.isEmpty) return const SizedBox.shrink();
     final owner = store.projectsOwner;
     final mine = owner == store.profile.id;
     return Card(

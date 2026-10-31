@@ -57,9 +57,12 @@ class Board {
   bool get isOwnerOrLocal => role == null || role == ShareRole.owner;
 
   /// "K7P2-QX9M" gibi okunur kod.
-  String get shareCodePretty => shareCode == null
-      ? ''
-      : '${shareCode!.substring(0, 4)}-${shareCode!.substring(4)}';
+  String get shareCodePretty {
+    final c = shareCode;
+    if (c == null) return '';
+    if (c.length != 8) return c; // eski tip ekip kodu (ör. fourmis-proje)
+    return '${c.substring(0, 4)}-${c.substring(4)}';
+  }
 
   Board({
     required this.id,
@@ -157,7 +160,7 @@ class Board {
   /// Geri alınabilir silme: kart gizlenir, Geçmiş'ten geri yüklenebilir.
   void deleteCard(CompanyCard card) {
     // kimseyle paylaşılmayan askılıkta kalıcı sil (geri yükleyecek geçmiş yok)
-    final sharedBoard = isProjects ? store.syncing : isShared;
+    final sharedBoard = isProjects ? store.rackCode.isNotEmpty : isShared;
     if (!sharedBoard) {
       cards.remove(card);
       _commit();
@@ -206,7 +209,7 @@ class Board {
     item.done = !item.done;
     if (item.done) {
       // paylaşılan askılıkta tiki profil kimliğiyle işaretle (rengi herkeste doğru çıksın)
-      item.doneBy = isShared && store.profile.id.isNotEmpty
+      item.doneBy = isShared && !isProjects && store.profile.id.isNotEmpty
           ? store.profile.id
           : store.currentMemberId;
       item.doneAt = DateTime.now();

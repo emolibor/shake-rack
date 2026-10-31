@@ -52,7 +52,6 @@ class _Home extends StatefulWidget {
 class _HomeState extends State<_Home> {
   final store = RackStore();
   bool _loaded = false;
-  int _tab = 0;
 
   @override
   void initState() {
@@ -71,6 +70,9 @@ class _HomeState extends State<_Home> {
     await showUpdateDialog(context, info);
   }
 
+  /// Seçili sekme (anahtar ile: Mesaj sekmesi gizlenince kayma olmasın).
+  String _tabKey = 'rack';
+
   @override
   Widget build(BuildContext context) {
     if (!_loaded) {
@@ -78,14 +80,47 @@ class _HomeState extends State<_Home> {
         body: Center(child: HangerLogo(size: 96, color: Color(0xFF8B6A3E))),
       );
     }
-    final pages = [
-      RacksPage(store: store),
-      CompletedScreen(store: store),
-      HistoryScreen(store: store),
-      ChatScreen(store: store),
-      TeamScreen(store: store),
+    return AnimatedBuilder(
+      animation: store,
+      builder: (context, _) => _scaffold(context),
+    );
+  }
+
+  Widget _scaffold(BuildContext context) {
+    final doneCount = store.boards.fold<int>(0, (s, b) => s + b.completed.length);
+    // (anahtar, başlık, sayfa, alt menü öğesi)
+    final tabs = <(String, String, Widget, NavigationDestination)>[
+      ('rack', 'Shake Rack', RacksPage(key: const ValueKey('rack'), store: store),
+          const NavigationDestination(icon: Icon(Icons.checkroom), label: 'Askılık')),
+      ('done', 'Tamamlananlar',
+          CompletedScreen(key: const ValueKey('done'), store: store),
+          NavigationDestination(
+            icon: Badge(
+              isLabelVisible: doneCount > 0,
+              label: Text('$doneCount'),
+              child: const Icon(Icons.emoji_events_outlined),
+            ),
+            label: 'Tamamlanan',
+          )),
+      ('history', 'Geçmiş', HistoryScreen(key: const ValueKey('history'), store: store),
+          NavigationDestination(
+            icon: Badge(
+              isLabelVisible: _tabKey != 'history' && store.unseenActivities > 0,
+              label: Text('${store.unseenActivities}'),
+              child: const Icon(Icons.history),
+            ),
+            label: 'Geçmiş',
+          )),
+      // proje sohbeti sadece Projeler askılığı varken
+      if (!store.projectsHidden)
+        ('chat', 'Mesaj', ChatScreen(key: const ValueKey('chat'), store: store),
+            const NavigationDestination(
+                icon: Icon(Icons.chat_bubble_outline), label: 'Mesaj')),
+      ('profile', 'Profil', TeamScreen(key: const ValueKey('profile'), store: store),
+          const NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profil')),
     ];
-    const titles = ['Askılık', 'Tamamlananlar', 'Geçmiş', 'Mesaj', 'Profil'];
+    var index = tabs.indexWhere((e) => e.$1 == _tabKey);
+    if (index < 0) index = 0;
 
     return Scaffold(
       appBar: AppBar(
@@ -96,81 +131,46 @@ class _HomeState extends State<_Home> {
             const HangerLogo(size: 28),
             const SizedBox(width: 10),
             Flexible(
-              child: Text(_tab == 0 ? 'Shake Rack' : titles[_tab],
-                  overflow: TextOverflow.ellipsis),
+              child: Text(tabs[index].$2, overflow: TextOverflow.ellipsis),
             ),
           ],
         ),
         actions: [
-          AnimatedBuilder(
-            animation: store,
-            builder: (_, __) => Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Tooltip(
-                  message: store.syncStatus,
-                  child: Icon(
-                    store.syncing
-                        ? (store.syncStatus == 'Eşitlendi'
-                            ? Icons.cloud_done_outlined
-                            : Icons.cloud_sync_outlined)
-                        : Icons.cloud_off_outlined,
-                    size: 20,
-                    color: Colors.white70,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Chip(
-                avatar: CircleAvatar(
-                    backgroundColor:
-                        store.hasProfile ? store.profile.color : store.me.color,
-                    radius: 8),
-                label: Text(store.hasProfile ? store.profile.name : store.me.name,
-                    style: const TextStyle(fontSize: 12)),
-                visualDensity: VisualDensity.compact,
+          if (store.syncing)
+            Tooltip(
+              message: '${store.projects.name}: ${store.syncStatus}',
+              child: Icon(
+                store.syncStatus == 'Eşitlendi'
+                    ? Icons.cloud_done_outlined
+                    : Icons.cloud_sync_outlined,
+                size: 20,
+                color: Colors.white70,
               ),
             ),
-              ],
+          const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Chip(
+              avatar: CircleAvatar(
+                  backgroundColor:
+                      store.hasProfile ? store.profile.color : store.me.color,
+                  radius: 8),
+              label: Text(store.hasProfile ? store.profile.name : store.me.name,
+                  style: const TextStyle(fontSize: 12)),
+              visualDensity: VisualDensity.compact,
             ),
           ),
         ],
       ),
-      body: IndexedStack(index: _tab, children: pages),
+      body: IndexedStack(index: index, children: [for (final e in tabs) e.$3]),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
+        selectedIndex: index,
         onDestinationSelected: (i) {
-          if (_tab == 2 || i == 2) store.markHistorySeen();
-          setState(() => _tab = i);
+          final key = tabs[i].$1;
+          if (_tabKey == 'history' || key == 'history') store.markHistorySeen();
+          setState(() => _tabKey = key);
         },
-        destinations: [
-          const NavigationDestination(icon: Icon(Icons.checkroom), label: 'Askılık'),
-          NavigationDestination(
-            icon: AnimatedBuilder(
-              animation: store,
-              builder: (_, __) => Badge(
-                isLabelVisible: store.completed.isNotEmpty,
-                label: Text('${store.completed.length}'),
-                child: const Icon(Icons.emoji_events_outlined),
-              ),
-            ),
-            label: 'Tamamlanan',
-          ),
-          NavigationDestination(
-            icon: AnimatedBuilder(
-              animation: store,
-              builder: (_, __) => Badge(
-                isLabelVisible: _tab != 2 && store.unseenActivities > 0,
-                label: Text('${store.unseenActivities}'),
-                child: const Icon(Icons.history),
-              ),
-            ),
-            label: 'Geçmiş',
-          ),
-          const NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: 'Mesaj'),
-          const NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profil'),
-        ],
+        destinations: [for (final e in tabs) e.$4],
       ),
     );
   }
