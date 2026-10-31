@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shake_rack/services/assistant.dart';
+import 'package:shake_rack/services/report.dart';
 import 'package:shake_rack/services/store.dart';
 
 /// Mesaj ekranındaki soruların doğru süzüldüğünü kontrol eder.
@@ -89,5 +90,42 @@ void main() {
     final a = bot.answer('paratoner kalan var mı');
     show('paratoner kalan var mı');
     expect(a, contains('kalmadı'));
+  });
+
+  group('Tasarlanmış liste (rapor)', () {
+    test('kalanlar raporu: sıra, kalan etiketler, ilerleme, kişi', () {
+      final r = bot.reply('hangi projeler kaldı').report!;
+      expect(r.title, 'Kalan Projeler');
+      expect(r.style, ReportStyle.remaining);
+      expect(r.rows.map((e) => e.title), ['Atilla Tekstil', 'Cupplast', 'Demir Lojistik']);
+      final atilla = r.rows.first;
+      expect(atilla.items, ['Mimari', 'Yangın Algılama']); // elektrik bitti
+      expect(atilla.done, 1);
+      expect(atilla.total, 3);
+      expect(r.rows[1].owner, 'Kullanıcı 2');
+      expect(r.summary, '3 firma · 6 proje kaldı');
+    });
+
+    test('süzülmüş rapor başlığı ve metin çıktısı', () {
+      final r = bot.reply('hangi firmaların elektrik projeleri kaldı').report!;
+      expect(r.title, 'Kalan Elektrik Projeleri');
+      expect(r.subtitle, startsWith('Elektrik'));
+      expect(r.rows.single.title, 'Cupplast');
+      final txt = r.toText();
+      expect(txt, startsWith('*Kalan Elektrik Projeleri*'));
+      expect(txt, contains('1. *Cupplast* (Kullanıcı 2)'));
+      expect(r.fileBase, startsWith('kalan-elektrik-projeleri-'));
+    });
+
+    test('bitenler raporu yeşil stilde', () {
+      final r = bot.reply('hangi firmaların elektriği bitti').report!;
+      expect(r.style, ReportStyle.done);
+      expect(r.rows.single.title, 'Atilla Tekstil');
+    });
+
+    test('sohbet cevaplarında rapor yok', () {
+      expect(bot.reply('merhaba').report, isNull);
+      expect(bot.reply("Atilla Tekstil'in durumu").report, isNull);
+    });
   });
 }

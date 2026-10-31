@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import '../services/assistant.dart';
+import '../services/report.dart';
 import '../services/store.dart';
+import '../widgets/report_card.dart';
 
 class _Msg {
   final String text;
   final bool mine;
-  _Msg(this.text, this.mine);
+  final Report? report;
+  final GlobalKey shotKey = GlobalKey(); // rapor görüntüsü için
+  _Msg(this.text, this.mine, [this.report]);
 }
 
 /// Mesaj ekranı: "Hangi projeler kaldı?" gibi sorulara liste cevabı verir.
@@ -45,7 +49,8 @@ class _ChatScreenState extends State<ChatScreen> {
     if (t.isEmpty) return;
     setState(() {
       _msgs.add(_Msg(t, true));
-      _msgs.add(_Msg(_bot.answer(t), false));
+      final r = _bot.reply(t);
+      _msgs.add(_Msg(r.text, false, r.report));
     });
     _ctrl.clear();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -54,6 +59,74 @@ class _ChatScreenState extends State<ChatScreen> {
             duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
       }
     });
+  }
+
+  bool _busy = false;
+
+  Future<void> _export(Future<void> Function() job) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await job();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Paylaşılamadı: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Tasarlanmış liste + altında Resim / PDF / Metin paylaşım butonları.
+  Widget _reportBubble(_Msg m) {
+    final r = m.report!;
+    Widget btn(IconData icon, String label, Future<void> Function() job) =>
+        Expanded(
+          child: TextButton.icon(
+            onPressed: _busy ? null : () => _export(job),
+            icon: Icon(icon, size: 18),
+            label: Text(label),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF6B4F2A),
+              padding: const EdgeInsets.symmetric(vertical: 10),
+            ),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            elevation: 2,
+            shadowColor: Colors.black26,
+            borderRadius: BorderRadius.circular(18),
+            color: Colors.transparent,
+            child: RepaintBoundary(
+              key: m.shotKey,
+              child: ReportCard(report: r),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF8E7),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                btn(Icons.image_outlined, 'Resim',
+                    () => ReportExport.sharePng(r, m.shotKey)),
+                btn(Icons.picture_as_pdf_outlined, 'PDF',
+                    () => ReportExport.sharePdf(r, m.shotKey)),
+                btn(Icons.notes, 'Metin', () => ReportExport.shareText(r)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -68,6 +141,7 @@ class _ChatScreenState extends State<ChatScreen> {
             itemCount: _msgs.length,
             itemBuilder: (context, i) {
               final m = _msgs[i];
+              if (m.report != null) return _reportBubble(m);
               return Align(
                 alignment: m.mine ? Alignment.centerRight : Alignment.centerLeft,
                 child: Container(

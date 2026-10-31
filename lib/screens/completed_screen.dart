@@ -40,9 +40,11 @@ class _CompletedScreenState extends State<CompletedScreen> {
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: ChoiceChip(
-                          avatar: b.isPrivate
-                              ? const Icon(Icons.lock, size: 14)
-                              : null,
+                          avatar: b.isShared
+                              ? const Icon(Icons.people_alt, size: 14)
+                              : b.isPrivate
+                                  ? const Icon(Icons.lock, size: 14)
+                                  : null,
                           label: Text('${b.name} (${b.completed.length})'),
                           selected: b.id == board.id,
                           onSelected: (_) => setState(() => _selected = b.id),
@@ -81,7 +83,7 @@ class _CompletedScreenState extends State<CompletedScreen> {
                   decoration: TextDecoration.lineThrough,
                   color: Colors.black54)),
           subtitle: Text(_date(c.completedAt)),
-          trailing: PopupMenuButton<String>(
+          trailing: !board.canEdit ? null : PopupMenuButton<String>(
             onSelected: (v) {
               if (v == 'reopen') {
                 board.reopen(c);
@@ -127,6 +129,7 @@ class _CompletedScreenState extends State<CompletedScreen> {
               child: Text(c.notes,
                   style: const TextStyle(fontStyle: FontStyle.italic)),
             ),
+          if (board.canEdit)
           OverflowBar(
             children: [
               TextButton.icon(

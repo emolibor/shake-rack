@@ -1,4 +1,5 @@
 import '../models/models.dart';
+import 'report.dart';
 import 'store.dart';
 
 /// Mesaj ekranındaki basit asistan. İnternet gerektirmez; soruları
@@ -72,7 +73,20 @@ class RackAssistant {
     return null;
   }
 
-  String answer(String raw) {
+  /// Son cevapta üretilen rapor (liste sorularında).
+  Report? _report;
+
+  /// Metin + (varsa) tasarlanmış rapor.
+  AssistantReply reply(String raw) {
+    _report = null;
+    final text = _answer(raw);
+    return AssistantReply(text, _report);
+  }
+
+  /// Sadece metin cevabı.
+  String answer(String raw) => reply(raw).text;
+
+  String _answer(String raw) {
     final q = _norm(raw);
     final types = _typesIn(q);
     final member = _memberIn(q);
@@ -125,6 +139,7 @@ class RackAssistant {
   String _remaining({Set<String> types = const {}, String? member}) {
     final who = store.memberById(member);
     final rows = <String>[];
+    final reportRows = <ReportRow>[];
     var total = 0;
     for (final c in store.active) {
       if (member != null && c.assignedTo != member) continue;
@@ -140,6 +155,14 @@ class RackAssistant {
           : ': ${rem.map((e) => kShortNames[e.type] ?? e.type).join(', ')}';
       final ownerTxt = (owner != null && member == null) ? ' (${owner.name})' : '';
       rows.add('${rows.length + 1}. ${c.name}$ownerTxt$detail');
+      reportRows.add(ReportRow(
+        title: c.name,
+        owner: owner?.name,
+        ownerColor: owner?.color,
+        items: rem.map((e) => kShortNames[e.type] ?? e.type).toList(),
+        done: c.items.where((e) => e.done).length,
+        total: c.items.length,
+      ));
     }
 
     final what = types.isEmpty ? 'proje' : '${_typesLabel(types)} projesi';
@@ -152,6 +175,18 @@ class RackAssistant {
     final head = types.isEmpty && who == null
         ? 'Öncelik sırana göre kalanlar:'
         : _cap('$whose$what kalan firmalar (öncelik sırasıyla):');
+    final filters = [
+      if (types.isNotEmpty) _typesLabel(types),
+      if (who != null) who.name,
+    ];
+    _report = Report(
+      title: types.isEmpty ? 'Kalan Projeler' : 'Kalan ${_typesLabel(types)} Projeleri',
+      subtitle: filters.isEmpty
+          ? 'Tüm firmalar · öncelik sırasıyla'
+          : '${filters.join(' · ')} · öncelik sırasıyla',
+      summary: '${rows.length} firma · $total proje kaldı',
+      rows: reportRows,
+    );
     return '$head\n${rows.join('\n')}\n\nToplam ${rows.length} firma, $total $what.';
   }
 
@@ -159,6 +194,8 @@ class RackAssistant {
   String _doneItems({Set<String> types = const {}, String? member}) {
     final who = store.memberById(member);
     final rows = <String>[];
+    final reportRows = <ReportRow>[];
+    var count = 0;
     for (final c in store.cards) {
       final done = c.items
           .where((e) =>
@@ -172,16 +209,50 @@ class RackAssistant {
         return '${kShortNames[e.type] ?? e.type}${by != null ? ' — ${by.name}' : ''}';
       }).join(', ');
       rows.add('• ${c.name}: $detail');
+      count += done.length;
+      final owner = store.memberById(c.assignedTo);
+      reportRows.add(ReportRow(
+        title: c.name,
+        owner: owner?.name,
+        ownerColor: owner?.color,
+        items: done.map((e) => kShortNames[e.type] ?? e.type).toList(),
+        done: c.items.where((e) => e.done).length,
+        total: c.items.length,
+      ));
     }
     final what = types.isEmpty ? 'proje' : '${_typesLabel(types)} projesi';
     final whose = who != null ? '${who.name} tarafından ' : '';
     if (rows.isEmpty) return 'Henüz ${whose}çizilmiş $what yok.';
+    _report = Report(
+      title: types.isEmpty ? 'Çizilen Projeler' : 'Çizilen ${_typesLabel(types)} Projeleri',
+      subtitle: who != null ? '${who.name} tarafından' : 'Tüm firmalar',
+      summary: '${rows.length} firma · $count proje çizildi',
+      rows: reportRows,
+      style: ReportStyle.done,
+    );
     return _cap('${whose}çizilen $what (${rows.length} firma):\n${rows.join('\n')}');
   }
 
   String _completed() {
     final done = store.completed;
     if (done.isEmpty) return 'Henüz tamamlanan firma yok.';
+    _report = Report(
+      title: 'Tamamlanan Firmalar',
+      subtitle: 'Tüm projeleri bitenler',
+      summary: '${done.length} firma tamamlandı',
+      style: ReportStyle.done,
+      rows: [
+        for (final c in done)
+          ReportRow(
+            title: c.name,
+            owner: store.memberById(c.assignedTo)?.name,
+            ownerColor: store.memberById(c.assignedTo)?.color,
+            items: c.items.map((e) => kShortNames[e.type] ?? e.type).toList(),
+            done: c.items.length,
+            total: c.items.length,
+          ),
+      ],
+    );
     final b = StringBuffer('Tamamlananlar (${done.length}):\n');
     for (final c in done) {
       b.writeln('• ${c.name} — ${c.items.length} proje');

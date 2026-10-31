@@ -18,6 +18,8 @@ dependencies:
   path_provider: ^2.1.4
   package_info_plus: ^8.0.2
   open_filex: ^4.5.0
+  share_plus: ^10.1.2
+  pdf: ^3.11.1
 
 dev_dependencies:
   flutter_test:

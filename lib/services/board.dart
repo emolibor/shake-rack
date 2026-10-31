@@ -11,6 +11,10 @@ import 'store.dart';
 /// Askılık türü: maddeli kartlar ya da sadece yazıdan ibaret notlar.
 enum BoardKind { items, notes }
 
+/// Paylaşılan askılıkta bu telefonun rolü.
+/// owner: paylaşan · editor: düzenleyebilir · viewer: sadece inceler
+enum ShareRole { owner, editor, viewer }
+
 class Board {
   static const projectsId = 'projects';
   static const _uuid = Uuid();
@@ -24,6 +28,27 @@ class Board {
 
   /// Sahibi olan store; değişiklikler onun üzerinden kaydedilir.
   late RackStore store;
+
+  // ---------- paylaşım ----------
+  /// Paylaşım kodu (ör. "K7P2QX9M"); null = paylaşılmıyor.
+  String? shareCode;
+  ShareRole? role;
+
+  /// Sahibin seçtiği izinler (paylaşılan herkes için).
+  bool shareCanEdit = true;
+  bool allowCopy = true;
+
+  /// Paylaşan kişi paylaşımı kapattı → bu artık yerel kopya (bilgi bandı için).
+  bool shareEnded = false;
+
+  bool get isShared => shareCode != null;
+  bool get canEdit => role != ShareRole.viewer;
+  bool get isOwnerOrLocal => role == null || role == ShareRole.owner;
+
+  /// "K7P2-QX9M" gibi okunur kod.
+  String get shareCodePretty => shareCode == null
+      ? ''
+      : '${shareCode!.substring(0, 4)}-${shareCode!.substring(4)}';
 
   Board({
     required this.id,
@@ -51,7 +76,8 @@ class Board {
         template: kind == BoardKind.notes ? [] : template,
       );
 
-  bool get isPrivate => !isProjects;
+  /// Grupla paylaşılmayan, kimseyle paylaşılmamış askılık.
+  bool get isPrivate => !isProjects && !isShared;
   bool get isNotes => kind == BoardKind.notes;
 
   /// Kart başlığı etiketi: projelerde firma, özelde serbest başlık.
@@ -63,7 +89,10 @@ class Board {
     ..sort((a, b) =>
         (b.completedAt ?? b.createdAt).compareTo(a.completedAt ?? a.createdAt));
 
-  void _commit() => store.boardChanged(this);
+  void _commit() {
+    if (!canEdit) return; // sadece inceleme: hiçbir değişiklik kaydedilmez
+    store.boardChanged(this);
+  }
 
   // ---------- kartlar ----------
   CompanyCard addCard(String name, List<String> types,
@@ -172,7 +201,41 @@ class Board {
         'template': template,
         'kind': kind.name,
         'cards': cards.map((e) => e.toJson()).toList(),
+        'shareCode': shareCode,
+        'role': role?.name,
+        'shareCanEdit': shareCanEdit,
+        'allowCopy': allowCopy,
+        'shareEnded': shareEnded,
       };
+
+  /// Buluttaki paylaşım belgesine giden içerik.
+  Map<String, dynamic> sharePayload() => {
+        'name': name,
+        'kind': kind.name,
+        'template': template,
+        'cards': cards.map((e) => e.toJson()).toList(),
+      };
+
+  /// Diğer telefondan gelen içeriği uygula.
+  void applyShared(Map<String, dynamic> d) {
+    name = (d['name'] as String?) ?? name;
+    template = List<String>.from(d['template'] ?? template);
+    cards = (d['cards'] as List? ?? [])
+        .map((e) => CompanyCard.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  /// Paylaşım belgesinden yeni askılık (kopya ya da canlı bağlantı için).
+  factory Board.fromShare(Map<String, dynamic> d) => Board(
+        id: _uuid.v4(),
+        name: (d['name'] as String?) ?? 'Paylaşılan askılık',
+        isProjects: false,
+        kind: d['kind'] == 'notes' ? BoardKind.notes : BoardKind.items,
+        template: List<String>.from(d['template'] ?? const []),
+        cards: (d['cards'] as List? ?? [])
+            .map((e) => CompanyCard.fromJson(Map<String, dynamic>.from(e)))
+            .toList(),
+      );
 
   factory Board.fromJson(Map<String, dynamic> j) => Board(
         id: j['id'],
@@ -183,5 +246,12 @@ class Board {
         cards: (j['cards'] as List? ?? [])
             .map((e) => CompanyCard.fromJson(Map<String, dynamic>.from(e)))
             .toList(),
-      );
+      )
+        ..shareCode = j['shareCode']
+        ..role = ShareRole.values
+            .cast<ShareRole?>()
+            .firstWhere((r) => r!.name == j['role'], orElse: () => null)
+        ..shareCanEdit = j['shareCanEdit'] ?? true
+        ..allowCopy = j['allowCopy'] ?? true
+        ..shareEnded = j['shareEnded'] ?? false;
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -119,6 +120,9 @@ class RackStore extends ChangeNotifier {
     if (renamed) await _saveLocal();
     notifyListeners();
     if (rackCode.isNotEmpty) _listen();
+    for (final b in custom) {
+      if (b.isShared) _listenShared(b);
+    }
   }
 
   /// "Ben"/"Arkadaşım" gibi eski varsayılan adları "Kullanıcı 1/2" yap.
@@ -245,11 +249,13 @@ class RackStore extends ChangeNotifier {
     _listen();
   }
 
-  /// Board değişince çağrılır. Sadece Projeler buluta gider.
+  /// Board değişince çağrılır. Projeler grup belgesine, paylaşılan özel
+  /// askılıklar kendi paylaşım belgesine gider; diğerleri sadece yerelde kalır.
   void boardChanged(Board b) {
     notifyListeners();
     _saveLocal();
     if (b.isProjects) _pushCloud();
+    if (b.isShared && b.canEdit && custom.contains(b)) _pushShared(b);
   }
 
   // ---------- özel askılıklar ----------
@@ -274,10 +280,171 @@ class RackStore extends ChangeNotifier {
     boardChanged(b);
   }
 
-  void deleteBoard(Board b) {
+  /// Askılığı sil. Paylaşan sahipse paylaşım da kapanır; alıcıysa sadece
+  /// kendi telefonundan çıkar.
+  Future<void> deleteBoard(Board b) async {
     if (b.isProjects) return;
+    if (b.isShared && b.role == ShareRole.owner) await stopSharing(b);
+    _unlistenShared(b);
     custom.remove(b);
-    boardChanged(b);
+    boardOrder.remove(b.id);
+    notifyListeners();
+    await _saveLocal();
+  }
+
+  // ---------- askılık paylaşma ----------
+  // Paylaşılan askılık, Firestore'da racks/share_<kod> belgesinde durur
+  // (mevcut güvenlik kuralının içinde kalır). Kodu bilen katılabilir.
+
+  static const _codeChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  final Map<String, StreamSubscription> _shareSubs = {};
+  final Map<String, Timer> _shareTimers = {};
+
+  static String newShareCode([Random? rnd]) {
+    final r = rnd ?? Random.secure();
+    return List.generate(8, (_) => _codeChars[r.nextInt(_codeChars.length)]).join();
+  }
+
+  /// Kullanıcının yazdığı kodu sadeleştir: "k7p2-qx9m " → "K7P2QX9M"
+  static String normalizeCode(String s) =>
+      s.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+
+  DocumentReference<Map<String, dynamic>> _shareDoc(String code) =>
+      FirebaseFirestore.instance
+          .collection('racks')
+          .doc('share_${code.toLowerCase()}');
+
+  /// Askılığı paylaş (ya da izinlerini güncelle). Kodu döner.
+  Future<String> shareBoard(Board b,
+      {required bool canEdit, required bool allowCopy}) async {
+    if (!firebaseReady) {
+      throw StateError('Paylaşım için internet / Firebase gerekli.');
+    }
+    b.shareCode ??= newShareCode();
+    b.role = ShareRole.owner;
+    b.shareCanEdit = canEdit;
+    b.allowCopy = allowCopy;
+    b.shareEnded = false;
+    await _shareDoc(b.shareCode!).set({
+      ...b.sharePayload(),
+      'permission': canEdit ? 'edit' : 'view',
+      'allowCopy': allowCopy,
+      'owner': deviceId,
+      'ownerName': me.name,
+      'updatedBy': deviceId,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    _listenShared(b);
+    notifyListeners();
+    await _saveLocal();
+    return b.shareCode!;
+  }
+
+  /// Paylaşımı kapat (sahip). Alıcılarda askılık yerel kopyaya dönüşür.
+  Future<void> stopSharing(Board b) async {
+    final code = b.shareCode;
+    if (code == null) return;
+    _unlistenShared(b);
+    if (b.role == ShareRole.owner && firebaseReady) {
+      try {
+        await _shareDoc(code).delete();
+      } catch (_) {}
+    }
+    b.shareCode = null;
+    b.role = null;
+    notifyListeners();
+    await _saveLocal();
+  }
+
+  /// Kodla paylaşılan askılığın içeriğini getir (önizleme). Yoksa null.
+  Future<Map<String, dynamic>?> fetchShared(String rawCode) async {
+    final code = normalizeCode(rawCode);
+    if (code.length != 8) return null;
+    final snap = await _shareDoc(code).get();
+    if (!snap.exists) return null;
+    return {...snap.data()!, 'code': code};
+  }
+
+  /// Paylaşılan askılığa canlı bağlan (izne göre düzenleyici / izleyici).
+  Board joinShared(Map<String, dynamic> data) {
+    final code = data['code'] as String;
+    final existing = custom.cast<Board?>()
+        .firstWhere((x) => x!.shareCode == code, orElse: () => null);
+    if (existing != null) return existing;
+    final b = Board.fromShare(data)..store = this;
+    b.shareCode = code;
+    b.shareCanEdit = data['permission'] != 'view';
+    b.role = b.shareCanEdit ? ShareRole.editor : ShareRole.viewer;
+    b.allowCopy = data['allowCopy'] ?? false;
+    custom.add(b);
+    _listenShared(b);
+    notifyListeners();
+    _saveLocal();
+    return b;
+  }
+
+  /// Paylaşılan askılığın bağımsız kopyasını kendi askılıklarına ekle.
+  Board copyShared(Map<String, dynamic> data, {String? name}) {
+    final b = Board.fromShare(data)..store = this;
+    if (name != null) b.name = name;
+    custom.add(b);
+    notifyListeners();
+    _saveLocal();
+    return b;
+  }
+
+  void _unlistenShared(Board b) {
+    _shareSubs.remove(b.id)?.cancel();
+    _shareTimers.remove(b.id)?.cancel();
+  }
+
+  void _pushShared(Board b) {
+    if (!firebaseReady || b.shareCode == null) return;
+    _shareTimers[b.id]?.cancel();
+    _shareTimers[b.id] = Timer(const Duration(milliseconds: 400), () async {
+      final code = b.shareCode;
+      if (code == null) return;
+      try {
+        await _shareDoc(code).set({
+          ...b.sharePayload(),
+          if (b.role == ShareRole.owner) ...{
+            'permission': b.shareCanEdit ? 'edit' : 'view',
+            'allowCopy': b.allowCopy,
+          },
+          'updatedBy': deviceId,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } catch (_) {/* çevrimdışı: Firestore kuyruğa alır */}
+    });
+  }
+
+  void _listenShared(Board b) {
+    if (!firebaseReady || b.shareCode == null) return;
+    _unlistenShared(b);
+    _shareSubs[b.id] = _shareDoc(b.shareCode!).snapshots().listen((snap) async {
+      if (!snap.exists) {
+        if (b.role != ShareRole.owner) {
+          // paylaşan kapattı → artık bu telefonda bağımsız kopya
+          _unlistenShared(b);
+          b.shareCode = null;
+          b.role = null;
+          b.shareEnded = true;
+          notifyListeners();
+          await _saveLocal();
+        }
+        return;
+      }
+      final d = snap.data()!;
+      final pending = _shareTimers[b.id]?.isActive ?? false;
+      if (d['updatedBy'] != deviceId && !pending) b.applyShared(d);
+      if (b.role != ShareRole.owner) {
+        b.shareCanEdit = d['permission'] != 'view';
+        b.role = b.shareCanEdit ? ShareRole.editor : ShareRole.viewer;
+        b.allowCopy = d['allowCopy'] ?? false;
+      }
+      notifyListeners();
+      await _saveLocal();
+    });
   }
 
   // ---------- ekip ----------
@@ -334,6 +501,12 @@ class RackStore extends ChangeNotifier {
 
   @override
   void dispose() {
+    for (final s in _shareSubs.values) {
+      s.cancel();
+    }
+    for (final t in _shareTimers.values) {
+      t.cancel();
+    }
     _sub?.cancel();
     _debounce?.cancel();
     super.dispose();

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/board.dart';
 import '../services/store.dart';
+import 'share_sheets.dart';
 
 /// Şablondaki bir madde; `orig` düzenlemeden önceki adı (yeni eklenense null).
 class _Entry {
@@ -128,7 +129,8 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: Text('"${b.name}" askılığını sil?'),
-        content: Text('İçindeki ${b.cards.length} ${b.isNotes ? 'not' : 'kart'} da silinecek. Geri alınamaz.'),
+        content: Text('İçindeki ${b.cards.length} ${b.isNotes ? 'not' : 'kart'} da silinecek. Geri alınamaz.'
+            '${b.isShared ? '\n\nPaylaşım da kapanır; paylaştığın kişilerde kendi kopyası olarak kalır.' : ''}'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Vazgeç')),
           FilledButton(
@@ -139,8 +141,8 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
       ),
     );
     if (ok == true && mounted) {
-      widget.store.deleteBoard(b);
-      Navigator.pop(context);
+      await widget.store.deleteBoard(b);
+      if (mounted) Navigator.pop(context);
     }
   }
 
@@ -171,6 +173,15 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
         title: Text(title),
         actions: [
           if (!_isNew && !_isProjects)
+            IconButton(
+              tooltip: 'Paylaş',
+              icon: Icon(widget.board!.isShared ? Icons.people_alt : Icons.ios_share),
+              onPressed: () async {
+                await showShareSheet(context, widget.store, widget.board!);
+                if (mounted) setState(() {});
+              },
+            ),
+          if (!_isNew && !_isProjects)
             IconButton(icon: const Icon(Icons.delete_outline), onPressed: _delete),
         ],
       ),
@@ -181,10 +192,24 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
               ? _info(Icons.groups_outlined,
                   'Projeler askılığı grupla paylaşılır; buradaki değişiklik herkeste görünür. '
                   'Bir maddenin adını değiştirirsen mevcut kartlardaki adı da değişir, tikler korunur.')
-              : _info(Icons.lock_outline,
-                  'Özel askılık sadece bu telefonda tutulur, grupla paylaşılmaz.'),
+              : (widget.board?.isShared ?? false)
+                  ? _info(Icons.people_alt_outlined,
+                      'Bu askılık ${widget.board!.shareCodePretty} koduyla paylaşılıyor. '
+                      'İzinleri sağ üstteki paylaş simgesinden değiştirebilirsin.')
+                  : _info(Icons.lock_outline,
+                      'Özel askılık sadece bu telefonda tutulur. Sağ üstteki paylaş '
+                      'simgesiyle istediğin kişiyle paylaşabilirsin.'),
           const SizedBox(height: 16),
           if (_isNew) ...[
+            OutlinedButton.icon(
+              onPressed: () async {
+                final b = await showJoinSheet(context, widget.store);
+                if (b != null && mounted) Navigator.pop(context, b);
+              },
+              icon: const Icon(Icons.qr_code_2),
+              label: const Text('Paylaşılan askılığa katıl (kodla)'),
+            ),
+            const SizedBox(height: 16),
             const Text('Askılık türü', style: TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             SegmentedButton<BoardKind>(

@@ -218,4 +218,82 @@ void main() {
       expect(notes.id, isNotEmpty);
     });
   });
+
+  group('Askılık paylaşma', () {
+    Map<String, dynamic> sharedDoc(RackStore owner, Board b,
+        {String permission = 'edit', bool allowCopy = true}) => {
+          ...b.sharePayload(),
+          'permission': permission,
+          'allowCopy': allowCopy,
+          'ownerName': owner.me.name,
+          'code': 'K7P2QX9M',
+        };
+
+    test('kod üretimi ve normalize', () {
+      final c = RackStore.newShareCode();
+      expect(c.length, 8);
+      expect(RegExp(r'^[A-HJ-NP-Z2-9]{8}$').hasMatch(c), isTrue);
+      expect(RackStore.normalizeCode(' k7p2-qx9m '), 'K7P2QX9M');
+    });
+
+    test('izle (sadece inceleme): değiştirilemez, kaydedilmez', () {
+      final owner = RackStore();
+      final reels = owner.addBoard('Reels', ['Instagram']);
+      reels.addCard('Video 1', reels.template);
+
+      final guest = RackStore();
+      final b = guest.joinShared(sharedDoc(owner, reels, permission: 'view'));
+      expect(b.isShared, isTrue);
+      expect(b.role, ShareRole.viewer);
+      expect(b.canEdit, isFalse);
+      expect(b.isPrivate, isFalse);
+      expect(b.cards.single.name, 'Video 1');
+      // aynı koda tekrar katılınca yeni askılık açılmaz
+      expect(guest.joinShared(sharedDoc(owner, reels, permission: 'view')), same(b));
+      expect(guest.custom.length, 1);
+    });
+
+    test('birlikte düzenle rolü', () {
+      final owner = RackStore();
+      final notes = owner.addBoard('Notlar', const [], kind: BoardKind.notes);
+      notes.addCard('Tabela', const []);
+      final guest = RackStore();
+      final b = guest.joinShared(sharedDoc(owner, notes));
+      expect(b.role, ShareRole.editor);
+      expect(b.canEdit, isTrue);
+      expect(b.isNotes, isTrue);
+    });
+
+    test('kopya bağımsızdır', () {
+      final owner = RackStore();
+      final reels = owner.addBoard('Reels', ['Instagram', 'YouTube']);
+      final c = reels.addCard('Video 1', reels.template);
+      reels.toggleItem(c, c.items[0]);
+
+      final guest = RackStore();
+      final copy = guest.copyShared(sharedDoc(owner, reels));
+      expect(copy.isShared, isFalse);
+      expect(copy.isPrivate, isTrue);
+      expect(copy.id, isNot(reels.id));
+      expect(copy.cards.single.items[0].done, isTrue); // durum kopyalanır
+      copy.addCard('Video 2', copy.template);
+      expect(reels.cards.length, 1); // asıl etkilenmez
+    });
+
+    test('paylaşım bilgisi kayıttan geri gelir, grup verisine karışmaz', () async {
+      final guest = RackStore();
+      final owner = RackStore();
+      final reels = owner.addBoard('GİZLİ Reels', ['Instagram']);
+      guest.joinShared(sharedDoc(owner, reels, permission: 'view', allowCopy: false));
+      expect(jsonEncode(guest.sharedJson()), isNot(contains('GİZLİ')));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final again = RackStore();
+      await again.load();
+      final b = again.custom.single;
+      expect(b.shareCode, 'K7P2QX9M');
+      expect(b.shareCodePretty, 'K7P2-QX9M');
+      expect(b.role, ShareRole.viewer);
+      expect(b.allowCopy, isFalse);
+    });
+  });
 }

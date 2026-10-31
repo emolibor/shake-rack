@@ -123,6 +123,18 @@ class _RackScreenState extends State<RackScreen> {
 
   void _add() => widget.board.isNotes ? _quickNote() : _openEdit();
 
+  /// Sadece inceleme izninde değişiklik engellenir.
+  void _guard(void Function() action) {
+    if (widget.board.canEdit) {
+      action();
+    } else {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+            content: Text('Bu askılığı sadece inceleyebilirsin 👁')));
+    }
+  }
+
   void _openEdit([CompanyCard? card]) {
     Navigator.push(
       context,
@@ -146,19 +158,7 @@ class _RackScreenState extends State<RackScreen> {
             final cards = board.active;
             return Column(
               children: [
-                if (board.isPrivate)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.lock_outline, size: 13, color: Colors.brown.shade400),
-                        const SizedBox(width: 4),
-                        Text('Özel askılık · sadece bu telefonda',
-                            style: TextStyle(fontSize: 11.5, color: Colors.brown.shade400)),
-                      ],
-                    ),
-                  ),
+                if (!board.isProjects) _StatusBand(board: board),
                 const SizedBox(height: 8),
                 SizedBox(
                   height: 28,
@@ -167,11 +167,13 @@ class _RackScreenState extends State<RackScreen> {
                 ),
                 Expanded(
                   child: cards.isEmpty
-                      ? _Empty(board: board, onAdd: _add)
+                      ? _Empty(board: board, onAdd: () => _guard(_add))
                       : ReorderableListView.builder(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
                           buildDefaultDragHandles: false,
-                          onReorder: board.reorderActive,
+                          onReorder: (o, n) {
+                            if (board.canEdit) board.reorderActive(o, n);
+                          },
                           proxyDecorator: (child, i, anim) => Transform.scale(
                               scale: 1.03, child: Material(color: Colors.transparent, child: child)),
                           itemCount: cards.length,
@@ -183,8 +185,8 @@ class _RackScreenState extends State<RackScreen> {
                                 card: c,
                                 index: i,
                                 ticking: _ticking.contains(c.id),
-                                onOpen: () => _openEdit(c),
-                                onToggle: () => _onNoteTick(c),
+                                onOpen: () => _guard(() => _openEdit(c)),
+                                onToggle: () => _guard(() => _onNoteTick(c)),
                               );
                             }
                             return RopeCard(
@@ -192,8 +194,8 @@ class _RackScreenState extends State<RackScreen> {
                               card: c,
                               store: store,
                               index: i,
-                              onOpen: () => _openEdit(c),
-                              onToggle: (it) => _onToggle(c, it),
+                              onOpen: () => _guard(() => _openEdit(c)),
+                              onToggle: (it) => _guard(() => _onToggle(c, it)),
                             );
                           },
                         ),
@@ -202,6 +204,7 @@ class _RackScreenState extends State<RackScreen> {
             );
           },
         ),
+        if (board.canEdit)
         Positioned(
           right: 16,
           bottom: 16,
@@ -378,6 +381,51 @@ class _BalloonPopState extends State<_BalloonPop>
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// İpin üstündeki ince bilgi bandı: özel / paylaşılıyor / sadece inceleme.
+class _StatusBand extends StatelessWidget {
+  final Board board;
+  const _StatusBand({required this.board});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = Colors.brown.shade400;
+    late final IconData icon;
+    late final String text;
+    if (board.shareEnded && !board.isShared) {
+      icon = Icons.link_off;
+      text = 'Paylaşım sonlandırıldı · bu artık senin kopyan';
+    } else if (!board.isShared) {
+      icon = Icons.lock_outline;
+      text = 'Özel askılık · sadece bu telefonda';
+    } else if (board.role == ShareRole.owner) {
+      icon = Icons.people_alt_outlined;
+      text = 'Paylaşılıyor · kod ${board.shareCodePretty} · '
+          '${board.shareCanEdit ? 'düzenleyebilirler' : 'sadece inceleyebilirler'}';
+    } else if (board.canEdit) {
+      icon = Icons.people_alt_outlined;
+      text = 'Paylaşılan askılık · düzenleyebilirsin';
+    } else {
+      icon = Icons.visibility_outlined;
+      text = 'Paylaşılan askılık · sadece inceleme';
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 13, color: c),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(text,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11.5, color: c)),
+          ),
+        ],
       ),
     );
   }

@@ -4,6 +4,7 @@ import '../services/store.dart';
 import '../widgets/rope_card.dart';
 import 'board_edit_screen.dart';
 import 'rack_screen.dart';
+import 'share_sheets.dart';
 
 /// Askılık sekmeleri: üstte askı etiketleri (Projeler + özel askılıklar + "+"),
 /// altında seçili askılığın ipi.
@@ -36,7 +37,9 @@ class _RacksPageState extends State<RacksPage> {
               boards: store.boards,
               selectedId: board.id,
               onSelect: (b) => setState(() => _selected = b.id),
-              onEdit: (b) => BoardEditScreen.edit(context, store, b),
+              onEdit: (b) => (b.role == ShareRole.editor || b.role == ShareRole.viewer)
+                  ? showSharedInfoSheet(context, store, b)
+                  : BoardEditScreen.edit(context, store, b),
               onReorder: store.reorderBoards,
               onAdd: _create,
             ),
@@ -127,6 +130,7 @@ class _HangerTabs extends StatelessWidget {
                       label: boards[i].name,
                       selected: boards[i].id == selectedId,
                       locked: boards[i].isPrivate,
+                      shared: boards[i].isShared,
                       count: boards[i].active.length,
                       notes: boards[i].isNotes,
                       onTap: () => onSelect(boards[i]),
@@ -150,6 +154,7 @@ class _HangerTabs extends StatelessWidget {
     required VoidCallback onTap,
     VoidCallback? onLongPress,
     bool locked = false,
+    bool shared = false,
     bool add = false,
     bool notes = false,
     int count = 0,
@@ -186,8 +191,9 @@ class _HangerTabs extends StatelessWidget {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (locked) ...[
-                        Icon(Icons.lock, size: 10, color: fg.withOpacity(0.8)),
+                      if (locked || shared) ...[
+                        Icon(shared ? Icons.people_alt : Icons.lock,
+                            size: 10, color: fg.withOpacity(0.8)),
                         const SizedBox(width: 3),
                       ],
                       ConstrainedBox(
