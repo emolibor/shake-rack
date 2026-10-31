@@ -10,6 +10,20 @@ altına `shake-rack.apk` olarak koyar. Telefondan o dosyayı indirip aç, kur.
 
 Elle yeniden derletmek için: **Actions → Android APK → Run workflow**.
 
+### Otomatik güncelleme
+
+Uygulama açılışta `releases/download/latest/version.json` dosyasına bakar; yeni sürüm varsa
+"Güncelle" diyaloğu çıkar, APK'yı indirip Android kurulum ekranını açar. Elle kontrol:
+**Ekip → Güncellemeleri denetle**. Bunun çalışması için repo **public** olmalı.
+
+### İmza anahtarı
+
+Güncellemelerin eski sürümün üzerine kurulabilmesi için her APK aynı anahtarla imzalanır.
+Anahtar repoda değil, **Settings → Secrets and variables → Actions** altında
+`SHAKE_RACK_SIGNING` adlı secret'ta durur (içerik: `şifre|keystore_base64`).
+Secret yoksa derleme yapılır ama yayınlanmaz. Anahtarın yedeğini kaybetme: kaybolursa
+telefonlardaki uygulamayı silip yeniden kurmak gerekir.
+
 ## Geliştirme (bilgisayarda)
 
 ```bash

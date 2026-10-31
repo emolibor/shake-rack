@@ -33,24 +33,32 @@ jobs:
             rm -f test/widget_test.dart
           fi
 
-      # Firebase eklentileri için minSdk 23, uygulama adı "Shake Rack"
+      # minSdk 23, uygulama adı, izinler, sabit imza (tool/patch_android.py)
       - name: Android ayarları
+        run: python3 tool/patch_android.py
+
+      # Sabit imza anahtarı: Settings → Secrets → Actions → SHAKE_RACK_SIGNING
+      # İçerik: "şifre|keystore_base64". Yoksa derleme durur (yanlış imzalı APK
+      # telefona güncelleme olarak kurulamaz).
+      - name: İmza anahtarı
+        env:
+          SIGNING: ${{ secrets.SHAKE_RACK_SIGNING }}
         run: |
-          for f in android/app/build.gradle android/app/build.gradle.kts; do
-            [ -f "$f" ] || continue
-            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' "$f"
-            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' "$f"
-          done
-          sed -i 's/android:label="[^"]*"/android:label="Shake Rack"/' android/app/src/main/AndroidManifest.xml
-          if [ -f ios/Runner/Info.plist ]; then
-            /usr/bin/env python3 - <<'PY'
-          import re
-          p = 'ios/Runner/Info.plist'
-          t = open(p).read()
-          t = re.sub(r'(<key>CFBundleDisplayName</key>\s*<string>)[^<]*', r'\1Shake Rack', t)
-          open(p, 'w').write(t)
-          PY
+          if [ -z "$SIGNING" ]; then
+            # Kod yine derlenip test edilsin ama yayınlanmasın.
+            echo "::warning::SHAKE_RACK_SIGNING yok → geçici anahtarla derlenecek, YAYINLANMAYACAK."
+            PW=$(openssl rand -hex 16)
+            keytool -genkeypair -storetype PKCS12 -keystore android/app/upload.jks -alias shakerack \
+              -keyalg RSA -keysize 2048 -validity 1 -storepass "$PW" -keypass "$PW" -dname "CN=tmp" >/dev/null
+            echo "SR_STORE_PASSWORD=$PW" >> "$GITHUB_ENV"
+            echo "NO_PUBLISH=1" >> "$GITHUB_ENV"
+            exit 0
           fi
+          PW="${SIGNING%%|*}"
+          echo "::add-mask::$PW"
+          printf '%s' "${SIGNING#*|}" | base64 -d > android/app/upload.jks
+          echo "SR_STORE_PASSWORD=$PW" >> "$GITHUB_ENV"
+          keytool -list -keystore android/app/upload.jks -storepass "$PW" | grep -i "SHA-256"
 
       - run: flutter pub get
 
@@ -61,10 +69,30 @@ jobs:
         run: dart run flutter_launcher_icons
 
       - name: APK derle
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release \
+            --build-number=${{ github.run_number }} \
+            --build-name=1.0.${{ github.run_number }}
 
       - name: APK adını düzenle
         run: cp build/app/outputs/flutter-apk/app-release.apk shake-rack.apk
+
+      # Uygulama açılışta bu dosyaya bakıp yeni sürüm olup olmadığını anlar.
+      - name: version.json
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          msg = (os.environ.get("MSG") or "").strip().splitlines()
+          json.dump({
+              "build": int(os.environ["GITHUB_RUN_NUMBER"]),
+              "name": "1.0." + os.environ["GITHUB_RUN_NUMBER"],
+              "notes": msg[0] if msg else "",
+              "apk": "https://github.com/emolibor/shake-rack/releases/download/latest/shake-rack.apk",
+          }, open("version.json", "w"), ensure_ascii=False)
+          PY
+          cat version.json
 
       - uses: actions/upload-artifact@v4
         with:
@@ -73,6 +101,7 @@ jobs:
 
       # "latest" sürümünü her seferinde güncelle → telefondan hep aynı linkten indir.
       - name: Releases'a yükle
+        if: env.NO_PUBLISH != '1'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
@@ -80,7 +109,15 @@ jobs:
           body: |
             Telefona kurmak için **shake-rack.apk** dosyasını indir ve aç.
             İlk kurulumda "bilinmeyen kaynaklardan yüklemeye izin ver" demen gerekebilir.
-            Derleme: ${{ github.sha }}
-          files: shake-rack.apk
+            Sürüm: 1.0.${{ github.run_number }} · ${{ github.sha }}
+          files: |
+            shake-rack.apk
+            version.json
           make_latest: true
           prerelease: false
+
+      - name: İmza anahtarı yoksa uyar
+        if: env.NO_PUBLISH == '1'
+        run: |
+          echo "::error::Derleme başarılı ama SHAKE_RACK_SIGNING secret'ı olmadığı için yayınlanmadı."
+          exit 1

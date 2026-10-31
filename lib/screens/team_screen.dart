@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/store.dart';
+import '../services/updater.dart';
 
 /// Ekip ayarları: kim kullanıyor (aktif kişi), isimler ve renkler.
 class TeamScreen extends StatelessWidget {
@@ -91,6 +92,8 @@ class TeamScreen extends StatelessWidget {
           const SizedBox(height: 24),
           const Divider(),
           _SyncCard(store: store),
+          const SizedBox(height: 8),
+          const _VersionCard(),
         ],
       ),
     );
@@ -191,6 +194,56 @@ class _SyncCardState extends State<_SyncCard> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Yüklü sürüm + elle güncelleme kontrolü.
+class _VersionCard extends StatefulWidget {
+  const _VersionCard();
+  @override
+  State<_VersionCard> createState() => _VersionCardState();
+}
+
+class _VersionCardState extends State<_VersionCard> {
+  String _version = '…';
+  bool _checking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Updater.currentVersion().then((v) {
+      if (mounted) setState(() => _version = v);
+    });
+  }
+
+  Future<void> _check() async {
+    setState(() => _checking = true);
+    final info = await Updater.check();
+    if (!mounted) return;
+    setState(() => _checking = false);
+    if (info == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('En güncel sürümü kullanıyorsun ✓')));
+    } else {
+      await showUpdateDialog(context, info);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.system_update_alt),
+        title: const Text('Güncellemeleri denetle'),
+        subtitle: Text('Yüklü sürüm: $_version'),
+        trailing: _checking
+            ? const SizedBox(
+                width: 20, height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.chevron_right),
+        onTap: _checking ? null : _check,
       ),
     );
   }

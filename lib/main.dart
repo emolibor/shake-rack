@@ -6,6 +6,7 @@ import 'screens/completed_screen.dart';
 import 'screens/rack_screen.dart';
 import 'screens/team_screen.dart';
 import 'services/store.dart';
+import 'services/updater.dart';
 import 'widgets/rope_card.dart';
 
 /// Firebase kurulduysa true. Kurulmadıysa uygulama yine çalışır, sadece yerel.
@@ -56,7 +57,17 @@ class _HomeState extends State<_Home> {
   void initState() {
     super.initState();
     store.firebaseReady = firebaseReady;
-    store.load().then((_) => setState(() => _loaded = true));
+    store.load().then((_) {
+      setState(() => _loaded = true);
+      _checkUpdate();
+    });
+  }
+
+  /// Açılışta sessizce yeni sürüm var mı bak; varsa sor.
+  Future<void> _checkUpdate() async {
+    final info = await Updater.check();
+    if (info == null || !mounted) return;
+    await showUpdateDialog(context, info);
   }
 
   @override
