@@ -281,9 +281,11 @@ void main() {
     });
 
     test('paylaşım bilgisi kayıttan geri gelir, grup verisine karışmaz', () async {
-      final guest = RackStore();
+      // Paylaşan taraf başka telefonda: aynı sahte hafızaya yazmasın diye
+      // store'a bağlı olmayan bir askılıkla temsil ediliyor.
       final owner = RackStore();
-      final reels = owner.addBoard('GİZLİ Reels', ['Instagram']);
+      final reels = Board.custom('GİZLİ Reels', ['Instagram']);
+      final guest = RackStore();
       guest.joinShared(sharedDoc(owner, reels, permission: 'view', allowCopy: false));
       expect(jsonEncode(guest.sharedJson()), isNot(contains('GİZLİ')));
       await Future<void>.delayed(const Duration(milliseconds: 50));
