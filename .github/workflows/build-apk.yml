@@ -63,7 +63,12 @@ jobs:
       - run: flutter pub get
 
       - name: Testler (mesaj ekranı soruları)
-        run: flutter test --reporter github
+        run: |
+          set +e
+          flutter test --machine > test-results.jsonl
+          code=$?
+          python3 tool/test_report.py test-results.jsonl
+          exit $code
 
       - name: Uygulama ikonu
         run: dart run flutter_launcher_icons
