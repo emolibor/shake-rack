@@ -89,7 +89,8 @@ class _HangerTabs extends StatelessWidget {
               locked: b.isPrivate,
               count: b.active.length,
               onTap: () => onSelect(b),
-              onLongPress: b.isPrivate ? () => onEdit(b) : null,
+              notes: b.isNotes,
+              onLongPress: () => onEdit(b),
             ),
           _tab(label: 'Yeni', selected: false, add: true, onTap: onAdd),
         ],
@@ -104,6 +105,7 @@ class _HangerTabs extends StatelessWidget {
     VoidCallback? onLongPress,
     bool locked = false,
     bool add = false,
+    bool notes = false,
     int count = 0,
   }) {
     final fg = selected ? Colors.white : _brown;
@@ -131,7 +133,9 @@ class _HangerTabs extends StatelessWidget {
                 children: [
                   add
                       ? Icon(Icons.add, size: 22, color: fg)
-                      : HangerLogo(size: 24, color: fg),
+                      : notes
+                          ? Icon(Icons.sticky_note_2_outlined, size: 22, color: fg)
+                          : HangerLogo(size: 24, color: fg),
                   const SizedBox(height: 2),
                   Row(
                     mainAxisSize: MainAxisSize.min,

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shake_rack/services/assistant.dart';
+import 'package:shake_rack/services/board.dart';
 import 'package:shake_rack/services/store.dart';
 
 void main() {
@@ -111,6 +112,85 @@ void main() {
       final b = bot.answer('kullanıcı 1 kalan');
       expect(b, contains('Atilla'));
       expect(b, isNot(contains('Demir')));
+    });
+  });
+
+  group('Not askılığı', () {
+    test('madde yok, nota tik → tamamlanır, geri alınır', () {
+      final store = RackStore();
+      final notes = store.addBoard('Notlar', ['yok sayılır'], kind: BoardKind.notes);
+      expect(notes.isNotes, isTrue);
+      expect(notes.template, isEmpty);
+      final n = notes.addCard('Tabela ölçüsünü sor', const []);
+      expect(n.items, isEmpty);
+      expect(notes.toggleNote(n), isTrue);
+      expect(notes.active, isEmpty);
+      expect(notes.completed.single.name, 'Tabela ölçüsünü sor');
+      notes.reopen(n);
+      expect(notes.active.single, n);
+    });
+
+    test('özel kalır ve türüyle geri yüklenir', () async {
+      final a = RackStore();
+      final notes = a.addBoard('Notlar', const [], kind: BoardKind.notes);
+      notes.addCard('ÖZEL NOT', const []);
+      expect(jsonEncode(a.sharedJson()), isNot(contains('ÖZEL NOT')));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final b = RackStore();
+      await b.load();
+      expect(b.custom.single.isNotes, isTrue);
+      expect(b.custom.single.cards.single.name, 'ÖZEL NOT');
+    });
+  });
+
+  group('Projeler maddelerini düzenleme', () {
+    test('ekle + yeniden adlandır: kartlar güncellenir, tik korunur, grupla paylaşılır', () {
+      final store = RackStore();
+      final c = store.addCard('Atilla Tekstil', ['Mimari Proje', 'Elektrik Projesi']);
+      store.toggleItem(c, c.items[1]); // elektrik tiklendi
+      final tpl = store.projects.template
+          .map((e) => e == 'Elektrik Projesi' ? 'Elektrik Tesisat Projesi' : e)
+          .toList()
+        ..add('Doğalgaz Projesi');
+      store.updateBoard(store.projects,
+          template: tpl, renames: {'Elektrik Projesi': 'Elektrik Tesisat Projesi'});
+
+      expect(store.projects.name, 'Projeler');
+      expect(c.items[1].type, 'Elektrik Tesisat Projesi');
+      expect(c.items[1].done, isTrue);
+      final shared = store.sharedJson();
+      expect(shared['projectTypes'], contains('Doğalgaz Projesi'));
+      expect(shared['projectTypes'], isNot(contains('Elektrik Projesi')));
+    });
+
+    test('asistan eklenen ve yeniden adlandırılan türleri anlar', () {
+      final store = RackStore();
+      store.updateBoard(store.projects,
+          template: [...store.projects.template, 'Doğalgaz Projesi']);
+      store.addCard('Demir Lojistik', ['Doğalgaz Projesi']);
+      store.addCard('Cupplast', ['Elektrik Projesi']);
+      final bot = RackAssistant(store);
+      final a = bot.answer('doğalgazı kalan firmalar');
+      expect(a, contains('Demir'));
+      expect(a, isNot(contains('Cupplast')));
+
+      final tpl = store.projects.template
+          .map((e) => e == 'Elektrik Projesi' ? 'Elektrik Tesisat Projesi' : e)
+          .toList();
+      store.updateBoard(store.projects,
+          template: tpl, renames: {'Elektrik Projesi': 'Elektrik Tesisat Projesi'});
+      final b = bot.answer('hangi firmaların elektriği kaldı');
+      expect(b, contains('Cupplast'));
+      expect(b, isNot(contains('Demir')));
+    });
+
+    test('düzenlenen türler kayıttan geri gelir', () async {
+      final a = RackStore();
+      a.updateBoard(a.projects, template: ['Mimari Proje', 'Statik Proje']);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final b = RackStore();
+      await b.load();
+      expect(b.projects.template, ['Mimari Proje', 'Statik Proje']);
     });
   });
 }

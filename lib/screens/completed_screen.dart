@@ -72,7 +72,33 @@ class _CompletedScreenState extends State<CompletedScreen> {
     );
   }
 
+  Widget _noteTile(Board board, CompanyCard c) => Card(
+        color: const Color(0xFFFFFBE6),
+        child: ListTile(
+          leading: Icon(Icons.check_circle, color: Colors.green.shade600),
+          title: Text(c.name,
+              style: const TextStyle(
+                  decoration: TextDecoration.lineThrough,
+                  color: Colors.black54)),
+          subtitle: Text(_date(c.completedAt)),
+          trailing: PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'reopen') {
+                board.reopen(c);
+              } else {
+                board.deleteCard(c);
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'reopen', child: Text('İpe geri as')),
+              PopupMenuItem(value: 'delete', child: Text('Sil')),
+            ],
+          ),
+        ),
+      );
+
   Widget _tile(Board board, CompanyCard c) {
+    if (board.isNotes) return _noteTile(board, c);
     final store = widget.store;
     final who = store.memberById(c.assignedTo);
     final unit = board.isProjects ? 'proje' : 'madde';

@@ -8,6 +8,9 @@ import 'store.dart';
 ///   paylaşılır (Firebase).
 /// - Özel askılıklar: adı ve şablonu kullanıcı belirler (ör. Reels →
 ///   Instagram, YouTube). SADECE bu telefonda saklanır, buluta gitmez.
+/// Askılık türü: maddeli kartlar ya da sadece yazıdan ibaret notlar.
+enum BoardKind { items, notes }
+
 class Board {
   static const projectsId = 'projects';
   static const _uuid = Uuid();
@@ -15,6 +18,7 @@ class Board {
   final String id;
   String name;
   final bool isProjects;
+  final BoardKind kind;
   List<String> template;
   List<CompanyCard> cards;
 
@@ -26,6 +30,7 @@ class Board {
     required this.name,
     required this.isProjects,
     required this.template,
+    this.kind = BoardKind.items,
     List<CompanyCard>? cards,
   }) : cards = cards ?? [];
 
@@ -36,14 +41,18 @@ class Board {
         template: List.of(kProjectTypes),
       );
 
-  factory Board.custom(String name, List<String> template) => Board(
+  factory Board.custom(String name, List<String> template,
+          {BoardKind kind = BoardKind.items}) =>
+      Board(
         id: _uuid.v4(),
         name: name.trim(),
         isProjects: false,
-        template: template,
+        kind: kind,
+        template: kind == BoardKind.notes ? [] : template,
       );
 
   bool get isPrivate => !isProjects;
+  bool get isNotes => kind == BoardKind.notes;
 
   /// Kart başlığı etiketi: projelerde firma, özelde serbest başlık.
   String get cardTitleLabel => isProjects ? 'Firma adı' : 'Başlık';
@@ -123,6 +132,27 @@ class Board {
     return finished;
   }
 
+  /// Not askılığında: notun üzerine tik. Tiklenince Tamamlananlar'a geçer.
+  /// Tamamlandıysa true döner.
+  bool toggleNote(CompanyCard card) {
+    card.completed = !card.completed;
+    card.completedAt = card.completed ? DateTime.now() : null;
+    _commit();
+    return card.completed;
+  }
+
+  /// Şablondaki maddelerin adı değişince kartlardaki aynı maddeleri de
+  /// yeniden adlandırır (tikler korunur). renames: eskiAd → yeniAd
+  void applyRenames(Map<String, String> renames) {
+    if (renames.isEmpty) return;
+    for (final c in cards) {
+      for (final it in c.items) {
+        final n = renames[it.type];
+        if (n != null) it.type = n;
+      }
+    }
+  }
+
   void markCompleted(CompanyCard card) {
     card.completed = true;
     card.completedAt = DateTime.now();
@@ -140,6 +170,7 @@ class Board {
         'id': id,
         'name': name,
         'template': template,
+        'kind': kind.name,
         'cards': cards.map((e) => e.toJson()).toList(),
       };
 
@@ -148,6 +179,7 @@ class Board {
         name: j['name'],
         isProjects: false,
         template: List<String>.from(j['template'] ?? const []),
+        kind: j['kind'] == 'notes' ? BoardKind.notes : BoardKind.items,
         cards: (j['cards'] as List? ?? [])
             .map((e) => CompanyCard.fromJson(Map<String, dynamic>.from(e)))
             .toList(),

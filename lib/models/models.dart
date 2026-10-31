@@ -57,7 +57,7 @@ const Map<String, String> kLegacyMemberNames = {
 
 /// Bir firmanın altındaki tek bir proje kalemi.
 class ProjectItem {
-  final String type;
+  String type; // yeniden adlandırılabilir
   bool done;
   String? doneBy; // tik atan kişinin id'si
   DateTime? doneAt;

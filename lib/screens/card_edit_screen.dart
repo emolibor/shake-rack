@@ -65,6 +65,16 @@ class _CardEditScreenState extends State<CardEditScreen> {
   }
 
   void _save() {
+    if (board.isNotes) {
+      if (_name.text.trim().isEmpty) return;
+      if (widget.card == null) {
+        board.addCard(_name.text, const []);
+      } else {
+        board.updateCard(widget.card!, name: _name.text);
+      }
+      Navigator.pop(context);
+      return;
+    }
     if (_name.text.trim().isEmpty || _selected.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
@@ -90,8 +100,10 @@ class _CardEditScreenState extends State<CardEditScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Kartı sil?'),
-        content: Text('${widget.card!.name} ipten alınacak.'),
+        title: Text(board.isNotes ? 'Notu sil?' : 'Kartı sil?'),
+        content: Text(board.isNotes
+            ? 'Bu not ipten alınacak.'
+            : '${widget.card!.name} ipten alınacak.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -108,9 +120,40 @@ class _CardEditScreenState extends State<CardEditScreen> {
     }
   }
 
+  /// Not askılığı: sadece yazı.
+  Widget _noteBody(bool isNew) => Scaffold(
+        backgroundColor: const Color(0xFFFFF8E7),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFFFFF4B8),
+          title: Text(isNew ? 'Yeni Not' : 'Notu Düzenle'),
+          actions: [
+            if (!isNew)
+              IconButton(icon: const Icon(Icons.delete_outline), onPressed: _delete),
+            IconButton(icon: const Icon(Icons.check), onPressed: _save),
+          ],
+        ),
+        body: Padding(
+          padding: const EdgeInsets.all(16),
+          child: TextField(
+            controller: _name,
+            autofocus: isNew,
+            maxLines: null,
+            expands: true,
+            textAlignVertical: TextAlignVertical.top,
+            textCapitalization: TextCapitalization.sentences,
+            style: const TextStyle(fontSize: 17, height: 1.4),
+            decoration: const InputDecoration(
+              hintText: 'Notunu yaz…',
+              border: InputBorder.none,
+            ),
+          ),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final isNew = widget.card == null;
+    if (board.isNotes) return _noteBody(isNew);
     return Scaffold(
       appBar: AppBar(
         title: Text(isNew ? 'Yeni Kart · ${board.name}' : 'Kartı Düzenle'),

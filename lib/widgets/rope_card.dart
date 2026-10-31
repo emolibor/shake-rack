@@ -185,6 +185,112 @@ class _ItemRow extends StatelessWidget {
   }
 }
 
+/// Not askılığında ipe asılı kağıt: sadece yazı + üzerine tik.
+class NoteRopeCard extends StatelessWidget {
+  final CompanyCard card;
+  final int index;
+  final VoidCallback onOpen;
+  final VoidCallback onToggle;
+  final bool ticking; // tiklendi, Tamamlananlar'a geçmek üzere
+
+  const NoteRopeCard({
+    super.key,
+    required this.card,
+    required this.index,
+    required this.onOpen,
+    required this.onToggle,
+    this.ticking = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tilt = ((index * 37) % 7 - 3) * 0.010;
+    // notlar sarı yapışkan kağıt tonunda, sırayla hafif farklı
+    const papers = [Color(0xFFFFF4B8), Color(0xFFFFF8E7), Color(0xFFFCEFD2)];
+    final paper = papers[index % papers.length];
+    final done = card.completed || ticking;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Transform.rotate(
+        angle: tilt,
+        alignment: Alignment.topCenter,
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.topCenter,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Material(
+                color: paper,
+                elevation: 3,
+                shadowColor: Colors.black38,
+                borderRadius: BorderRadius.circular(4),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(4),
+                  onTap: onOpen,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 14, 6, 10),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: onToggle,
+                          child: Padding(
+                            padding: const EdgeInsets.all(6),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: done ? Colors.green.shade600 : Colors.transparent,
+                                border: Border.all(
+                                    color: done ? Colors.green.shade600 : Colors.black54,
+                                    width: 1.7),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: done
+                                  ? const Icon(Icons.check, size: 17, color: Colors.white)
+                                  : null,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 7),
+                            child: Text(
+                              card.name,
+                              style: TextStyle(
+                                fontSize: 15.5,
+                                height: 1.35,
+                                color: done ? Colors.black45 : const Color(0xFF2B2B2B),
+                                decoration: done ? TextDecoration.lineThrough : null,
+                              ),
+                            ),
+                          ),
+                        ),
+                        ReorderableDragStartListener(
+                          index: index,
+                          child: const Padding(
+                            padding: EdgeInsets.all(6),
+                            child: Icon(Icons.drag_indicator, color: Colors.black26),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const Positioned(top: 0, child: _Clothespin()),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Tahta mandal.
 class _Clothespin extends StatelessWidget {
   final Color? color;

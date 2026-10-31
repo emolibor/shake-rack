@@ -16,6 +16,7 @@ import 'board.dart';
 class RackStore extends ChangeNotifier {
   static const _kCards = 'cards_v1'; // Projeler askılığının kartları
   static const _kCustom = 'custom_boards_v1'; // özel askılıklar (yerel)
+  static const _kProjectTypes = 'project_types_v1'; // Projeler maddeleri
   static const _kMembers = 'members_v1';
   static const _kCurrent = 'current_member_v1';
   static const _kRackCode = 'rack_code_v1';
@@ -70,6 +71,8 @@ class RackStore extends ChangeNotifier {
       projects.cards =
           (jsonDecode(c) as List).map((e) => CompanyCard.fromJson(e)).toList();
     }
+    final pt = p.getStringList(_kProjectTypes);
+    if (pt != null && pt.isNotEmpty) projects.template = pt;
     final cb = p.getString(_kCustom);
     if (cb != null) {
       custom = (jsonDecode(cb) as List)
@@ -111,6 +114,7 @@ class RackStore extends ChangeNotifier {
     final p = await SharedPreferences.getInstance();
     await p.setString(
         _kCards, jsonEncode(projects.cards.map((e) => e.toJson()).toList()));
+    await p.setStringList(_kProjectTypes, projects.template);
     await p.setString(
         _kCustom, jsonEncode(custom.map((e) => e.toJson()).toList()));
     await p.setString(
@@ -123,6 +127,7 @@ class RackStore extends ChangeNotifier {
   Map<String, dynamic> sharedJson() => {
         'cards': projects.cards.map((e) => e.toJson()).toList(),
         'members': members.map((e) => e.toJson()).toList(),
+        'projectTypes': projects.template,
       };
 
   Map<String, dynamic> _toCloud() => {
@@ -136,6 +141,10 @@ class RackStore extends ChangeNotifier {
     projects.cards = (d['cards'] as List? ?? [])
         .map((e) => CompanyCard.fromJson(Map<String, dynamic>.from(e)))
         .toList();
+    final pt = d['projectTypes'] as List?;
+    if (pt != null && pt.isNotEmpty) {
+      projects.template = pt.map((e) => e.toString()).toList();
+    }
     final ms = d['members'] as List?;
     if (ms != null && ms.isNotEmpty) {
       members =
@@ -219,17 +228,24 @@ class RackStore extends ChangeNotifier {
   }
 
   // ---------- özel askılıklar ----------
-  Board addBoard(String name, List<String> template) {
-    final b = Board.custom(name, template)..store = this;
+  Board addBoard(String name, List<String> template,
+      {BoardKind kind = BoardKind.items}) {
+    final b = Board.custom(name, template, kind: kind)..store = this;
     custom.add(b);
     boardChanged(b);
     return b;
   }
 
-  void updateBoard(Board b, {String? name, List<String>? template}) {
-    if (b.isProjects) return;
-    if (name != null && name.trim().isNotEmpty) b.name = name.trim();
-    if (template != null) b.template = template;
+  /// Askılığı güncelle. Projeler'in adı sabit, maddeleri düzenlenebilir
+  /// (grupla eşitlenir). renames: şablonda adı değişen maddeler (eski → yeni),
+  /// kartlardaki aynı maddeler de yeniden adlandırılır.
+  void updateBoard(Board b,
+      {String? name, List<String>? template, Map<String, String> renames = const {}}) {
+    if (!b.isProjects && name != null && name.trim().isNotEmpty) {
+      b.name = name.trim();
+    }
+    if (template != null && template.isNotEmpty) b.template = template;
+    b.applyRenames(renames);
     boardChanged(b);
   }
 

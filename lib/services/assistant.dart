@@ -7,35 +7,51 @@ class RackAssistant {
   final RackStore store;
   RackAssistant(this.store);
 
-  /// Sorudaki kelime → proje türü. "yangın" tek başına üç yangın projesini kapsar.
-  static const Map<String, List<String>> _typeKeys = {
-    'mimari': ['Mimari Proje'],
-    'elektri': ['Elektrik Projesi'], // elektrik / elektriği / elektrikler
-    'algilama': ['Yangın Algılama Projesi'],
-    'sondurme': ['Yangın Söndürme Tesisatı Projesi'],
-    'tesisat': ['Yangın Söndürme Tesisatı Projesi'],
-    'sprink': ['Yangın Söndürme Tesisatı Projesi'],
-    'havalandirma': ['Havalandırma Projesi'],
-    'kacis': ['Yangın Kaçış Projesi'],
-    'raf': ['Raf Yerleşim Projesi'],
-    'paratoner': ['Paratoner Projesi'],
-    'yildirim': ['Paratoner Projesi'],
+  /// Eş anlamlılar: sorudaki kelime → bu kelimeyi içeren proje türü kelimesi.
+  static const Map<String, String> _synonyms = {
+    'sprink': 'sondurme',
+    'yildirim': 'paratoner',
   };
 
-  /// Sorudan proje türlerini çıkar. Boş set = filtre yok.
+  static const _stop = {'projesi', 'proje', 'projeleri', 've', 'ile'};
+
+  /// Bir kelimenin kökü: ekli halleri yakalamak için son harf atılır
+  /// (elektrik → elektri: "elektriği" ✓, mimari → mimar: "mimarisi" ✓).
+  static String _stem(String w) => w.length > 5 ? w.substring(0, w.length - 1) : w;
+
+  /// Sorudan proje türlerini çıkar (Projeler askılığındaki GÜNCEL maddelerden).
+  /// Boş set = filtre yok. Birden fazla türde geçen kelime ("yangın") hepsini
+  /// kapsar; daha özel bir kelime ("algılama") varsa yalnız o tür seçilir.
   Set<String> _typesIn(String q) {
-    final out = <String>{};
-    _typeKeys.forEach((k, v) {
-      if (_word(q, k)) out.addAll(v);
-    });
-    if (out.isEmpty && _word(q, 'yangin')) {
-      out.addAll([
-        'Yangın Algılama Projesi',
-        'Yangın Söndürme Tesisatı Projesi',
-        'Yangın Kaçış Projesi',
-      ]);
+    final template = store.projects.template;
+    final words = <String, List<String>>{}; // tür → kelimeler
+    final freq = <String, int>{};
+    for (final t in template) {
+      final ws = _norm(t)
+          .split(RegExp(r'[^a-z0-9]+'))
+          .where((w) => w.length >= 3 && !_stop.contains(w))
+          .toSet()
+          .toList();
+      words[t] = ws;
+      for (final w in ws) {
+        freq[w] = (freq[w] ?? 0) + 1;
+      }
     }
-    return out;
+    var qn = q;
+    _synonyms.forEach((k, v) {
+      if (_word(qn, k)) qn = '$qn $v';
+    });
+
+    final specific = <String>{};
+    final shared = <String>{};
+    words.forEach((t, ws) {
+      for (final w in ws) {
+        if (_word(qn, _stem(w))) {
+          (freq[w]! > 1 ? shared : specific).add(t);
+        }
+      }
+    });
+    return specific.isNotEmpty ? specific : shared;
   }
 
   /// Sorudan kişi çıkar: "benim/bende/bana" → bu telefonun sahibi, ya da kişi adı.
@@ -98,7 +114,7 @@ class RackAssistant {
 
   /// "Elektrik", "Yangın Algılama ve Elektrik" gibi okunur başlık.
   String _typesLabel(Set<String> types) {
-    final names = kProjectTypes
+    final names = store.projects.template
         .where(types.contains)
         .map((t) => kShortNames[t] ?? t)
         .toList();

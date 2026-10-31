@@ -54,6 +54,75 @@ class _RackScreenState extends State<RackScreen> {
     ));
   }
 
+  /// Not askılığı: üstü çizili göster, kısa süre sonra Tamamlananlar'a at.
+  final Set<String> _ticking = {};
+
+  Future<void> _onNoteTick(CompanyCard card) async {
+    final board = widget.board;
+    if (_ticking.contains(card.id)) return;
+    setState(() => _ticking.add(card.id));
+    await Future<void>.delayed(const Duration(milliseconds: 650));
+    if (!mounted) return;
+    _ticking.remove(card.id);
+    board.toggleNote(card);
+    _confetti.play();
+    final short = card.name.length > 30 ? '${card.name.substring(0, 30)}…' : card.name;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text('✓ $short'),
+        duration: const Duration(seconds: 3),
+        action: SnackBarAction(
+          label: 'Geri al',
+          onPressed: () => board.reopen(card),
+        ),
+      ));
+  }
+
+  /// Not askılığı: alttan açılan hızlı not yazma.
+  Future<void> _quickNote() async {
+    final ctrl = TextEditingController();
+    final text = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFFFF4B8),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            16, 16, 16, MediaQuery.of(ctx).viewInsets.bottom + 16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: ctrl,
+                autofocus: true,
+                minLines: 1,
+                maxLines: 6,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  hintText: 'Notunu yaz…',
+                  border: InputBorder.none,
+                ),
+              ),
+            ),
+            IconButton.filled(
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              icon: const Icon(Icons.push_pin),
+            ),
+          ],
+        ),
+      ),
+    );
+    ctrl.dispose();
+    if (text != null && text.trim().isNotEmpty) {
+      widget.board.addCard(text, const []);
+    }
+  }
+
+  void _add() => widget.board.isNotes ? _quickNote() : _openEdit();
+
   void _openEdit([CompanyCard? card]) {
     Navigator.push(
       context,
@@ -98,7 +167,7 @@ class _RackScreenState extends State<RackScreen> {
                 ),
                 Expanded(
                   child: cards.isEmpty
-                      ? _Empty(board: board, onAdd: () => _openEdit())
+                      ? _Empty(board: board, onAdd: _add)
                       : ReorderableListView.builder(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
                           buildDefaultDragHandles: false,
@@ -108,6 +177,16 @@ class _RackScreenState extends State<RackScreen> {
                           itemCount: cards.length,
                           itemBuilder: (context, i) {
                             final c = cards[i];
+                            if (board.isNotes) {
+                              return NoteRopeCard(
+                                key: ValueKey(c.id),
+                                card: c,
+                                index: i,
+                                ticking: _ticking.contains(c.id),
+                                onOpen: () => _openEdit(c),
+                                onToggle: () => _onNoteTick(c),
+                              );
+                            }
                             return RopeCard(
                               key: ValueKey(c.id),
                               card: c,
@@ -127,9 +206,9 @@ class _RackScreenState extends State<RackScreen> {
           right: 16,
           bottom: 16,
           child: FloatingActionButton.extended(
-            onPressed: () => _openEdit(),
-            icon: const Icon(Icons.add),
-            label: const Text('Kart as'),
+            onPressed: _add,
+            icon: Icon(board.isNotes ? Icons.edit_note : Icons.add),
+            label: Text(board.isNotes ? 'Not yaz' : 'Kart as'),
           ),
         ),
         Align(
@@ -162,11 +241,17 @@ class _Empty extends StatelessWidget {
           children: [
             const HangerLogo(size: 72, color: Color(0xFF8B6A3E)),
             const SizedBox(height: 12),
-            Text(board.isProjects ? 'İp boş. İlk firmayı as!' : '${board.name} ipi boş. İlk kartı as!',
+            Text(board.isProjects
+                ? 'İp boş. İlk firmayı as!'
+                : board.isNotes
+                    ? '${board.name} ipi boş. İlk notunu yaz!'
+                    : '${board.name} ipi boş. İlk kartı as!',
                 style: TextStyle(fontSize: 16, color: Colors.black54)),
             const SizedBox(height: 12),
             OutlinedButton.icon(
-                onPressed: onAdd, icon: const Icon(Icons.add), label: const Text('Kart as')),
+                onPressed: onAdd,
+                icon: Icon(board.isNotes ? Icons.edit_note : Icons.add),
+                label: Text(board.isNotes ? 'Not yaz' : 'Kart as')),
           ],
         ),
       );
