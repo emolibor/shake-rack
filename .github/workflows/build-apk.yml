@@ -30,7 +30,7 @@ jobs:
         run: |
           if [ ! -d android ]; then
             flutter create --org com.fourmis --project-name shake_rack --platforms android,ios .
-            rm -rf test
+            rm -f test/widget_test.dart
           fi
 
       # Firebase eklentileri için minSdk 23, uygulama adı "Shake Rack"
@@ -53,6 +53,9 @@ jobs:
           fi
 
       - run: flutter pub get
+
+      - name: Testler (mesaj ekranı soruları)
+        run: flutter test --reporter expanded
 
       - name: Uygulama ikonu
         run: dart run flutter_launcher_icons
