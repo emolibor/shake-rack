@@ -321,6 +321,7 @@ void main() {
       final a = RackStore();
       await a.hideProjects();
       a.addBoard('Alışveriş', const [], kind: BoardKind.notes);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
       final b = RackStore();
       await b.load();
       expect(b.projectsHidden, isTrue);
