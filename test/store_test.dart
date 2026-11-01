@@ -593,4 +593,20 @@ void main() {
       expect(s.projects.cards, isEmpty); // kendi Projeler'ine dokunulmaz
     });
   });
+
+  test('Bitenler rozeti bakınca sıfırlanır', () async {
+    final s = RackStore();
+    await s.load();
+    final b = s.addBoard('Yapılacaklar', const [], kind: BoardKind.notes);
+    final n = b.addCard('Gözlük çizimi', const []);
+    expect(s.unseenCompleted, 0);
+    b.toggleNote(n);
+    expect(s.unseenCompleted, 1);
+    s.markDoneSeen();
+    expect(s.unseenCompleted, 0);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    final again = RackStore();
+    await again.load();
+    expect(again.unseenCompleted, 0); // bakıldığı kayıtlı
+  });
 }

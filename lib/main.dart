@@ -92,7 +92,7 @@ class _HomeState extends State<_Home> {
   }
 
   Widget _scaffold(BuildContext context) {
-    final doneCount = store.boards.fold<int>(0, (s, b) => s + b.completed.length);
+    final doneCount = store.unseenCompleted;
     // (anahtar, başlık, sayfa, alt menü öğesi)
     final tabs = <(String, String, Widget, NavigationDestination)>[
       ('rack', 'Shake Rack', RacksPage(key: const ValueKey('rack'), store: store),
@@ -101,7 +101,7 @@ class _HomeState extends State<_Home> {
           CompletedScreen(key: const ValueKey('done'), store: store),
           NavigationDestination(
             icon: Badge(
-              isLabelVisible: doneCount > 0,
+              isLabelVisible: _tabKey != 'done' && doneCount > 0,
               label: Text('$doneCount'),
               child: const Icon(Icons.emoji_events_outlined),
             ),
@@ -173,6 +173,7 @@ class _HomeState extends State<_Home> {
         onDestinationSelected: (i) {
           final key = tabs[i].$1;
           if (_tabKey == 'history' || key == 'history') store.markHistorySeen();
+          if (_tabKey == 'done' || key == 'done') store.markDoneSeen();
           setState(() => _tabKey = key);
         },
         destinations: [for (final e in tabs) e.$4],

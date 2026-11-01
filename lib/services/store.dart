@@ -30,6 +30,7 @@ class RackStore extends ChangeNotifier {
   static const _kProjectsOwner = 'projects_owner_v1';
   static const _kProjectsLog = 'projects_log_v1';
   static const _kHistorySeen = 'history_seen_v1';
+  static const _kDoneSeen = 'done_seen_v1';
   static const _kProjectsUsed = 'projects_used_v1';
   static const _kProjectsPerm = 'projects_perm_v1';
   static const _kProjectsCopy = 'projects_copy_v1';
@@ -71,6 +72,22 @@ class RackStore extends ChangeNotifier {
 
   /// Geçmiş sekmesine en son ne zaman bakıldı (rozet için).
   DateTime historySeenAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Bitenler sekmesine en son ne zaman bakıldı.
+  DateTime doneSeenAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Son bakıştan beri tamamlanan kart sayısı (Bitenler rozeti).
+  int get unseenCompleted => boards
+      .expand((b) => b.completed)
+      .where((c) => c.completedAt != null && c.completedAt!.isAfter(doneSeenAt))
+      .length;
+
+  void markDoneSeen() {
+    doneSeenAt = DateTime.now();
+    notifyListeners();
+    SharedPreferences.getInstance()
+        .then((p) => p.setString(_kDoneSeen, doneSeenAt.toIso8601String()));
+  }
 
   /// Diğer kullanıcıların, son bakıştan beri yaptığı işlem sayısı.
   int get unseenActivities => activities
@@ -176,6 +193,14 @@ class RackStore extends ChangeNotifier {
     projects.name = p.getString(_kProjectsName) ?? projects.name;
     projectsOwner = p.getString(_kProjectsOwner);
     historySeenAt = DateTime.tryParse(p.getString(_kHistorySeen) ?? '') ?? historySeenAt;
+    final ds = DateTime.tryParse(p.getString(_kDoneSeen) ?? '');
+    if (ds != null) {
+      doneSeenAt = ds;
+    } else {
+      // ilk açılış: eski tamamlananlar rozet olarak sayılmasın
+      doneSeenAt = DateTime.now();
+      await p.setString(_kDoneSeen, doneSeenAt.toIso8601String());
+    }
     final pl = p.getString(_kProjectsLog);
     if (pl != null) projectsLog = _parseLog(jsonDecode(pl));
     final pr = p.getString(_kProfile);
