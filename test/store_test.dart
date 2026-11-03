@@ -14,12 +14,12 @@ void main() {
   group('Özel askılıklar', () {
     test('buluta giden veride özel askılık yok', () {
       final store = RackStore();
-      store.addCard('Atilla Tekstil', ['Mimari Proje']);
+      store.addCard('Örnek Tekstil', ['Mimari Proje']);
       final reels = store.addBoard('Reels', ['Instagram', 'YouTube']);
       reels.addCard('GİZLİ kat planı videosu', reels.template);
 
       final shared = jsonEncode(store.sharedJson());
-      expect(shared, contains('Atilla Tekstil'));
+      expect(shared, contains('Örnek Tekstil'));
       expect(shared, isNot(contains('GİZLİ')));
       expect(shared, isNot(contains('Reels')));
       expect(shared, isNot(contains('Instagram')));
@@ -56,7 +56,7 @@ void main() {
 
     test('askılık silinir; Projeler de silinip geri eklenebilir', () async {
       final store = RackStore();
-      store.addCard('Atilla', ['Mimari Proje']);
+      store.addCard('Örnek', ['Mimari Proje']);
       final r = store.addBoard('Reels', ['Instagram']);
       await store.deleteBoard(r);
       expect(store.boards.map((b) => b.id), ['projects']);
@@ -95,7 +95,7 @@ void main() {
 
     test('kullanıcı silinince atamaları boşalır, son kullanıcı silinmez', () {
       final store = RackStore();
-      final c = store.projects.addCard('Cupplast', ['Elektrik Projesi'],
+      final c = store.projects.addCard('Mavi Ambalaj', ['Elektrik Projesi'],
           assignedTo: 'friend');
       expect(store.removeMember('friend'), isTrue);
       expect(c.assignedTo, isNull);
@@ -110,15 +110,15 @@ void main() {
       }
       final u12 = store.members.firstWhere((m) => m.name == 'Kullanıcı 12');
       store.projects
-          .addCard('Demir Lojistik', ['Mimari Proje'], assignedTo: u12.id);
-      store.projects.addCard('Atilla', ['Mimari Proje'], assignedTo: 'me');
+          .addCard('Kuzey Lojistik', ['Mimari Proje'], assignedTo: u12.id);
+      store.projects.addCard('Örnek', ['Mimari Proje'], assignedTo: 'me');
       final bot = RackAssistant(store);
       final a = bot.answer('Kullanıcı 12 kalan işler');
-      expect(a, contains('Demir'));
-      expect(a, isNot(contains('Atilla')));
+      expect(a, contains('Kuzey'));
+      expect(a, isNot(contains('Örnek')));
       final b = bot.answer('kullanıcı 1 kalan');
-      expect(b, contains('Atilla'));
-      expect(b, isNot(contains('Demir')));
+      expect(b, contains('Örnek'));
+      expect(b, isNot(contains('Kuzey')));
     });
   });
 
@@ -153,7 +153,7 @@ void main() {
   group('Projeler maddelerini düzenleme', () {
     test('ekle + yeniden adlandır: kartlar güncellenir, tik korunur, grupla paylaşılır', () {
       final store = RackStore();
-      final c = store.addCard('Atilla Tekstil', ['Mimari Proje', 'Elektrik Projesi']);
+      final c = store.addCard('Örnek Tekstil', ['Mimari Proje', 'Elektrik Projesi']);
       store.toggleItem(c, c.items[1]); // elektrik tiklendi
       final tpl = store.projects.template
           .map((e) => e == 'Elektrik Projesi' ? 'Elektrik Tesisat Projesi' : e)
@@ -174,12 +174,12 @@ void main() {
       final store = RackStore();
       store.updateBoard(store.projects,
           template: [...store.projects.template, 'Doğalgaz Projesi']);
-      store.addCard('Demir Lojistik', ['Doğalgaz Projesi']);
-      store.addCard('Cupplast', ['Elektrik Projesi']);
+      store.addCard('Kuzey Lojistik', ['Doğalgaz Projesi']);
+      store.addCard('Mavi Ambalaj', ['Elektrik Projesi']);
       final bot = RackAssistant(store);
       final a = bot.answer('doğalgazı kalan firmalar');
-      expect(a, contains('Demir'));
-      expect(a, isNot(contains('Cupplast')));
+      expect(a, contains('Kuzey'));
+      expect(a, isNot(contains('Mavi Ambalaj')));
 
       final tpl = store.projects.template
           .map((e) => e == 'Elektrik Projesi' ? 'Elektrik Tesisat Projesi' : e)
@@ -187,8 +187,8 @@ void main() {
       store.updateBoard(store.projects,
           template: tpl, renames: {'Elektrik Projesi': 'Elektrik Tesisat Projesi'});
       final b = bot.answer('hangi firmaların elektriği kaldı');
-      expect(b, contains('Cupplast'));
-      expect(b, isNot(contains('Demir')));
+      expect(b, contains('Mavi Ambalaj'));
+      expect(b, isNot(contains('Kuzey')));
     });
 
     test('düzenlenen türler kayıttan geri gelir', () async {
@@ -405,7 +405,7 @@ void main() {
 
     test('paylaşılmayan askılıkta silme kalıcıdır, geçmiş yazılmaz', () {
       final s = RackStore();
-      final c = s.addCard('Atilla', ['Mimari Proje']);
+      final c = s.addCard('Örnek', ['Mimari Proje']);
       s.projects.deleteCard(c);
       expect(s.projects.cards, isEmpty);
       expect(s.activities, isEmpty);
@@ -459,10 +459,10 @@ void main() {
       final s = RackStore()
         ..profile = const Member(id: 'p-me', name: 'Emirhan', color: Color(0xFF2E7DE0));
       final b = ownedShared(s);
-      final c = b.addCard('Atilla Tekstil', ['Elektrik Projesi']);
+      final c = b.addCard('Örnek Tekstil', ['Elektrik Projesi']);
       b.toggleItem(c, c.items.single);
       expect(s.activities.firstWhere((a) => a.action == 'tick').text,
-          'Atilla Tekstil · Elektrik tiklendi');
+          'Örnek Tekstil · Elektrik tiklendi');
       expect(s.unseenActivities, 0); // kendi işlemlerim sayılmaz
 
       // diğer telefondan gelen geçmiş
@@ -475,12 +475,12 @@ void main() {
           Activity(
             id: 'x1', at: DateTime.now(), by: 'p-ayse', byName: 'Ayşe',
             byColor: 0xFFE02E7D, boardId: b.id, boardName: 'Reels',
-            action: 'complete', cardId: c.id, card: 'Atilla Tekstil',
+            action: 'complete', cardId: c.id, card: 'Örnek Tekstil',
           ).toJson(),
         ],
       });
       expect(s.activities.firstWhere((a) => a.by == 'p-ayse').text,
-          'Atilla Tekstil tamamlandı 🎉');
+          'Örnek Tekstil tamamlandı 🎉');
       expect(s.unseenActivities, 1);
       s.markHistorySeen();
       expect(s.unseenActivities, 0);
@@ -496,7 +496,7 @@ void main() {
           'ownerName': 'Emirhan',
           'permission': perm,
           'allowCopy': true,
-          'projectsName': 'Fourmis Projeler',
+          'projectsName': 'Ekip Projeler',
           'projectTypes': ['Mimari Proje', 'Elektrik Projesi'],
           'members': [
             {'id': 'me', 'name': 'Kullanıcı 1', 'color': 0xFF2E7DE0},
@@ -504,7 +504,7 @@ void main() {
           ],
           'cards': [
             {
-              'id': 'c1', 'name': 'Atilla Tekstil', 'createdAt': '2026-10-31T10:00:00.000',
+              'id': 'c1', 'name': 'Örnek Tekstil', 'createdAt': '2026-10-31T10:00:00.000',
               'items': [
                 {'type': 'Mimari Proje', 'done': true, 'doneBy': 'me'},
                 {'type': 'Elektrik Projesi', 'done': false},
@@ -525,14 +525,14 @@ void main() {
     });
 
     test('eski kullanıcıda Projeler olduğu gibi kalır', () async {
-      SharedPreferences.setMockInitialValues({'cards_v1': '[]', 'rack_code_v1': 'fourmis-proje'});
+      SharedPreferences.setMockInitialValues({'cards_v1': '[]', 'rack_code_v1': 'eski-ekip-kodu'});
       final s = RackStore();
       await s.load();
       expect(s.projectsHidden, isFalse);
       expect(s.projectsEverUsed, isTrue);
       // eski kod: kod olarak görünür, sahipsizken herkes yönetebilir
       expect(s.projects.isShared, isTrue);
-      expect(s.projects.shareCodePretty, 'fourmis-proje');
+      expect(s.projects.shareCodePretty, 'eski-ekip-kodu');
       expect(s.projects.role, isNull);
     });
 
@@ -550,8 +550,8 @@ void main() {
       expect(b, same(s.projects));
       expect(s.projectsHidden, isFalse);
       expect(s.rackCode, 'share_k7p2qx9m');
-      expect(s.projects.name, 'Fourmis Projeler');
-      expect(s.projects.live.single.name, 'Atilla Tekstil');
+      expect(s.projects.name, 'Ekip Projeler');
+      expect(s.projects.live.single.name, 'Örnek Tekstil');
       expect(s.projects.role, ShareRole.editor);
       expect(s.projects.canEdit, isTrue);
       expect(s.projects.canManage, isFalse); // sahip değil
@@ -559,7 +559,7 @@ void main() {
       expect(s.projects.people['p-guest'], 'editor');
       // sahip olmayan proje türlerini / ekibi değiştiremez
       s.updateBoard(s.projects, name: 'Benim', template: ['X']);
-      expect(s.projects.name, 'Fourmis Projeler');
+      expect(s.projects.name, 'Ekip Projeler');
       expect(s.addMember(), isNull);
     });
 
@@ -587,7 +587,7 @@ void main() {
       final c = s.copyShared(projectsDoc());
       expect(c.isProjects, isFalse);
       expect(c.isNotes, isFalse);
-      expect(c.name, 'Fourmis Projeler');
+      expect(c.name, 'Ekip Projeler');
       expect(c.template, ['Mimari Proje', 'Elektrik Projesi']);
       expect(c.cards.single.items.first.done, isTrue);
       expect(s.projects.cards, isEmpty); // kendi Projeler'ine dokunulmaz
@@ -614,7 +614,7 @@ void main() {
     final s = RackStore()
       ..profile = const Member(id: 'p-me', name: 'Emirhan', color: Color(0xFF2E7DE0));
     // eski tip kod: bağlantı yok, geçiş önerilir
-    SharedPreferences.setMockInitialValues({'cards_v1': '[]', 'rack_code_v1': 'fourmis-proje'});
+    SharedPreferences.setMockInitialValues({'cards_v1': '[]', 'rack_code_v1': 'eski-ekip-kodu'});
     final legacy = RackStore();
     await legacy.load();
     expect(legacy.projectsOnLegacyCode, isTrue);
@@ -623,14 +623,14 @@ void main() {
     // yeni tip: share_<kod>
     s.joinProjects({
       'kind': 'projects', '_doc': 'share_k7p2qx9m', 'code': 'K7P2QX9M',
-      'owner': 'p-me', 'projectsName': 'Fourmis Projeler', 'cards': [],
+      'owner': 'p-me', 'projectsName': 'Ekip Projeler', 'cards': [],
     });
     expect(s.projectsOnLegacyCode, isFalse);
     final link = s.inviteLink(s.projects);
     expect(link, startsWith('https://emolibor.github.io/shake-rack/katil/?k=K7P2QX9M'));
     final u = Uri.parse(link);
     expect(u.queryParameters['k'], 'K7P2QX9M');
-    expect(u.queryParameters['n'], 'Fourmis Projeler');
+    expect(u.queryParameters['n'], 'Ekip Projeler');
     expect(u.queryParameters['o'], 'Emirhan');
   });
 

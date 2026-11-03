@@ -98,7 +98,7 @@ class RackAssistant {
     final asksDone = _has(q, ['tamamlanan', 'biten', 'bitti', 'bitirdik', 'yaptik', 'yapilan', 'cizilen', 'cizdik']);
     final asksLeft = _has(q, ['kalan', 'kaldi', 'ne kaldi', 'hangi proje', 'eksik', 'bitmeyen', 'yapilacak', 'cizilecek', 'bekleyen']);
 
-    // firma adı geçiyorsa ("Atilla Tekstil'in elektriği kaldı mı") → o firmanın kartı
+    // firma adı geçiyorsa ("Örnek Tekstil'in elektriği kaldı mı") → o firmanın kartı
     for (final c in store.cards) {
       final n = _norm(c.name).trim();
       if (n.isNotEmpty && q.contains(n)) return _cardDetail(c);

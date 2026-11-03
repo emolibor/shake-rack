@@ -60,7 +60,7 @@ class Board {
   String get shareCodePretty {
     final c = shareCode;
     if (c == null) return '';
-    if (c.length != 8) return c; // eski tip ekip kodu (ör. fourmis-proje)
+    if (c.length != 8) return c; // eski tip ekip kodu (ör. eski-ekip-kodu)
     return '${c.substring(0, 4)}-${c.substring(4)}';
   }
 

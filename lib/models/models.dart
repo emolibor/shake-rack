@@ -179,7 +179,7 @@ class Activity {
     this.item = '',
   });
 
-  /// "Atilla Tekstil · Elektrik tiklendi"
+  /// "Örnek Tekstil · Elektrik tiklendi"
   String get text {
     final c = card.length > 60 ? '${card.substring(0, 60)}…' : card;
     switch (action) {

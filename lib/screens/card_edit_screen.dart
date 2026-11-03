@@ -174,7 +174,7 @@ class _CardEditScreenState extends State<CardEditScreen> {
             textCapitalization: TextCapitalization.sentences,
             decoration: InputDecoration(
               labelText: board.cardTitleLabel,
-              hintText: board.isProjects ? 'Atilla Tekstil' : 'Örn. Kat planı reels',
+              hintText: board.isProjects ? 'Örnek Tekstil' : 'Örn. Kat planı reels',
               border: const OutlineInputBorder(),
             ),
           ),

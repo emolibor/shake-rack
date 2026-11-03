@@ -72,10 +72,9 @@ Uygulama Firebase olmadan da çalışır (yerel mod). Ortak askılık için bir 
    flutter run
    ```
    Android'de `minSdkVersion` 21+ ve iOS'ta deployment target 13+ olmalı (flutterfire uyarırsa artır).
-5. Uygulamada **Ekip** sekmesi → **Ortak askılık** → ikiniz de aynı kodu girin (ör. `fourmis-proje`) → Bağlan.
+5. Uygulamada bir askılığa uzun bas → **Paylaş** → bağlantıyı gönder. Bağlantıya dokunan
+   kişide uygulama açılır ve katılma ekranı hazır gelir (davet sayfası: `web/katil/`).
 
-Çalışma mantığı: tüm kartlar `racks/{kod}` tek belgesinde tutulur, her değişiklik 300 ms
-sonra buluta yazılır, karşı taraf canlı dinler. İnternet yoksa yerelde saklanır, gelince eşitlenir.
-Hangi kişinin telefonu olduğu (Ekip → radyo seçimi) cihaza özeldir, buluta gitmez.
-
-Kodu bilen herkes askılığı görebilir; kodu 6+ karakter ve tahmin edilmesi zor tut.
+Çalışma mantığı: paylaşılan her askılık Firestore'da `racks/share_<rastgele-anahtar>` belgesinde
+durur; anahtar sadece davet bağlantısında bulunur. Listeleme kurallarla kapalıdır
+(`firestore.rules`), yani anahtarı bilmeyen hiçbir askılığa ulaşamaz.

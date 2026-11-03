@@ -150,7 +150,7 @@ class RackStore extends ChangeNotifier {
   bool toggleItem(CompanyCard card, ProjectItem item) =>
       projects.toggleItem(card, item);
 
-  /// Paylaşılan askılık kodu (ör. "fourmis-2026"). Boşsa sadece yerel.
+  /// Paylaşılan askılık kodu (ör. "ekip-2026"). Boşsa sadece yerel.
   String rackCode = '';
   bool firebaseReady = false; // Firebase.initializeApp başarılı mı
   bool get syncing => firebaseReady && rackCode.isNotEmpty;
@@ -532,7 +532,7 @@ class RackStore extends ChangeNotifier {
     rawCode = extractCode(rawCode.trim());
     final code = normalizeCode(rawCode);
     if (code.length == 8) return _fetchDoc('share_${code.toLowerCase()}', code);
-    // eski tip ekip kodu (ör. "fourmis-proje")
+    // eski tip ekip kodu (ör. "eski-ekip-kodu")
     final legacy = _rackId(rawCode);
     if (legacy.length < 6) return null;
     return _fetchDoc(legacy, legacy);
@@ -725,7 +725,7 @@ class RackStore extends ChangeNotifier {
 
   // ---------- Projeler'i paylaşma (diğer askılıklar gibi) ----------
   // Yeni paylaşımlar racks/share_<kod> belgesinde durur. Eski tip ekip kodu
-  // (ör. "fourmis-proje") aynı şekilde çalışmaya devam eder.
+  // (ör. "eski-ekip-kodu") aynı şekilde çalışmaya devam eder.
 
   /// Projeler askılığının paylaşım bilgilerini (kod, rol, izin) güncel tut.
   void _syncProjectsShareState() {
@@ -801,7 +801,7 @@ class RackStore extends ChangeNotifier {
         '${owner.isEmpty ? '' : '&o=${Uri.encodeQueryComponent(owner)}'}';
   }
 
-  /// Eski ekip kodundan (ör. "fourmis-proje") rastgele bağlantıya geç.
+  /// Eski ekip kodundan (ör. "eski-ekip-kodu") rastgele bağlantıya geç.
   /// Veri yeni belgeye kopyalanır, eski belge sadece yönlendirme olarak kalır:
   /// şu an bağlı olanlar otomatik taşınır, eski kodu yeni deneyen giremez.
   Future<String> migrateProjectsToLink() async {
