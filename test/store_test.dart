@@ -633,4 +633,19 @@ void main() {
     expect(u.queryParameters['n'], 'Fourmis Projeler');
     expect(u.queryParameters['o'], 'Emirhan');
   });
+
+  test('her paylaşım bağlantıyla: özel askılık bağlantısı ve yapıştırılan bağlantı', () {
+    final s = RackStore()
+      ..profile = const Member(id: 'p-me', name: 'Emirhan', color: Color(0xFF2E7DE0));
+    final notes = s.addBoard('Alışveriş', const [], kind: BoardKind.notes);
+    notes.shareCode = 'ABCD2345';
+    notes.role = ShareRole.owner;
+    final link = s.inviteLink(notes);
+    expect(Uri.parse(link).queryParameters['k'], 'ABCD2345');
+    expect(Uri.parse(link).queryParameters['n'], 'Alışveriş');
+    expect(RackStore.extractCode(link), 'ABCD2345');
+    expect(RackStore.extractCode('Katılmak için dokun:\n$link'), 'ABCD2345');
+    expect(RackStore.extractCode('abcd-2345'), 'abcd-2345'); // düz kod olduğu gibi
+    expect(RackStore.normalizeCode(RackStore.extractCode('abcd-2345')), 'ABCD2345');
+  });
 }

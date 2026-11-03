@@ -136,7 +136,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               const SizedBox(height: 10),
               Text(
                 nothing
-                    ? 'Henüz geçmiş yok.\nOrtak askılıklarda (proje kodu ya da paylaştığın askılıklar) '
+                    ? 'Henüz geçmiş yok.\nPaylaşılan askılıklarda '
                         'yapılan tikler, tamamlananlar ve silinenler burada görünür.'
                     : 'Diğer kullanıcılardan henüz bir işlem yok.',
                 textAlign: TextAlign.center,

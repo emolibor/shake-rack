@@ -129,7 +129,7 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
     final String body;
     if (b.isProjects) {
       body = synced
-          ? 'Bu telefondan kaldırılır. Ekip koduna bağlı olduğun için ekibin '
+          ? 'Bu telefondan kaldırılır. Paylaşıldığı için ekibin '
               'proje verisi silinmez; istersen + Yeni → "Ekip projeleri" ile geri eklersin.'
           : 'İçindeki ${b.cards.length} kart silinir. İstersen sonra + Yeni → '
               '"Ekip projeleri" ile boş olarak geri eklersin.';
@@ -204,7 +204,7 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
                           'Bir maddenin adını değiştirirsen mevcut kartlardaki adı da değişir, tikler korunur.')
               : (widget.board?.isShared ?? false)
                   ? _info(Icons.people_alt_outlined,
-                      'Bu askılık ${widget.board!.shareCodePretty} koduyla paylaşılıyor. '
+                      'Bu askılık bağlantıyla paylaşılıyor. '
                       'İzinleri sağ üstteki paylaş simgesinden değiştirebilirsin.')
                   : _info(Icons.lock_outline,
                       'Özel askılık sadece bu telefonda tutulur. Sağ üstteki paylaş '
@@ -218,7 +218,7 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
                 leading: const Icon(Icons.groups_outlined),
                 title: const Text('Ekip projeleri'),
                 subtitle: const Text(
-                    'Firma/proje takibi: proje türleri, kişi ataması, ekip kodu ve sohbetten liste.'),
+                    'Firma/proje takibi: proje türleri, kişi ataması, ekiple paylaşım ve sohbetten liste.'),
                 trailing: const Icon(Icons.add),
                 onTap: () => Navigator.pop(context, widget.store.showProjects()),
               ),
@@ -232,7 +232,7 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
                 if (b != null && mounted) Navigator.pop(context, b);
               },
               icon: const Icon(Icons.qr_code_2),
-              label: const Text('Paylaşılan askılığa katıl (kodla)'),
+              label: const Text('Paylaşılan askılığa katıl (bağlantıyla)'),
             ),
             const SizedBox(height: 16),
             const Text('Askılık türü', style: TextStyle(fontWeight: FontWeight.w600)),

@@ -406,7 +406,7 @@ class _StatusBand extends StatelessWidget {
       text = 'Özel askılık · sadece bu telefonda';
     } else if (board.role == ShareRole.owner) {
       icon = Icons.people_alt_outlined;
-      text = 'Paylaşılıyor · kod ${board.shareCodePretty} · '
+      text = 'Bağlantıyla paylaşılıyor · '
           '${board.shareCanEdit ? 'düzenleyebilirler' : 'sadece inceleyebilirler'}';
     } else if (board.canEdit) {
       icon = Icons.people_alt_outlined;

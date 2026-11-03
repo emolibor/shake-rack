@@ -522,7 +522,14 @@ class RackStore extends ChangeNotifier {
   }
 
   /// Kodla paylaşılan askılığın içeriğini getir (önizleme). Yoksa null.
+  /// Yapıştırılan bağlantıdan kodu çıkar ("…/katil/?k=K7P2QX9M&n=…" → "K7P2QX9M").
+  static String extractCode(String raw) {
+    final m = RegExp(r'[?&]k=([A-Za-z0-9\-]+)').firstMatch(raw);
+    return m != null ? m.group(1)! : raw;
+  }
+
   Future<Map<String, dynamic>?> fetchShared(String rawCode) async {
+    rawCode = extractCode(rawCode.trim());
     final code = normalizeCode(rawCode);
     if (code.length == 8) return _fetchDoc('share_${code.toLowerCase()}', code);
     // eski tip ekip kodu (ör. "fourmis-proje")

@@ -321,7 +321,7 @@ class _OwnerRow extends StatelessWidget {
                 ? 'Askılığın sahibi sensin'
                 : 'Sahibi: ${store.projectsOwnerName}'),
         subtitle: Text(owner == null
-            ? 'Şu an koda bağlı herkes her şeyi değiştirebilir. Sahiplenince adı, proje türlerini '
+            ? 'Şu an katılan herkes her şeyi değiştirebilir. Sahiplenince adı, proje türlerini '
                 've kullanıcıları sadece sen değiştirirsin; silinen firmaları geri yüklersin.'
             : mine
                 ? 'Diğerleri tik atar, firma ekler; askılığın ayarlarını sadece sen değiştirirsin.'

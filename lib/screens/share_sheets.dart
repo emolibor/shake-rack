@@ -11,7 +11,7 @@ const _apkUrl =
 String _inviteText(RackStore store, Board b) {
   final perm = b.shareCanEdit ? 'birlikte düzenleyebiliriz' : 'sadece inceleyebilirsin';
   final link = store.inviteLink(b);
-  if (b.isProjects && link.isNotEmpty) {
+  if (link.isNotEmpty) {
     return '📌 Shake Rack\'te "${b.name}" askılığına seni davet ettim ($perm).\n\n'
         'Katılmak için dokun:\n$link';
   }
@@ -67,7 +67,7 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
         Text('"${b.name}" askılığını paylaş',
             style: Theme.of(ctx).textTheme.titleLarge),
         const SizedBox(height: 4),
-        const Text('Kodu alan kişi kendi telefonunda bu askılığı görür.',
+        const Text('Bağlantıyı alan kişi kendi telefonunda bu askılığı görür.',
             style: TextStyle(color: Colors.black54)),
         const SizedBox(height: 16),
         SegmentedButton<bool>(
@@ -130,7 +130,7 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
               ],
             ),
           ),
-        ] else if (shared && b.isProjects) ...[
+        ] else if (shared) ...[
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
@@ -172,44 +172,12 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
               ],
             ),
           ),
-        ] else if (shared) ...[
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF8E7),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE8DCC6)),
-            ),
-            child: Column(
-              children: [
-                const Text('PAYLAŞIM KODU',
-                    style: TextStyle(fontSize: 11, letterSpacing: 2, color: Colors.black45)),
-                const SizedBox(height: 4),
-                SelectableText(b.shareCodePretty,
-                    style: const TextStyle(
-                        fontSize: 30,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 3,
-                        fontFamily: 'monospace')),
-                TextButton.icon(
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: b.shareCodePretty));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Kod kopyalandı')));
-                  },
-                  icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('Kopyala'),
-                ),
-              ],
-            ),
-          ),
         ],
         if (store.friends.values.any((f) => !b.people.containsKey(f.id))) ...[
           const SizedBox(height: 12),
           const Text('Arkadaşına doğrudan gönder',
               style: TextStyle(fontWeight: FontWeight.w600)),
-          const Text('Kod gerekmez; askılık onun telefonunda kendiliğinden belirir.',
+          const Text('Bağlantı bile gerekmez; askılık onun telefonunda kendiliğinden belirir.',
               style: TextStyle(fontSize: 12, color: Colors.black54)),
           const SizedBox(height: 8),
           Wrap(
@@ -256,7 +224,7 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
                 ? const SizedBox(
                     width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.ios_share),
-            label: Text(b.isProjects ? 'Bağlantı oluştur ve gönder' : 'Kod oluştur ve gönder'),
+            label: const Text('Bağlantı oluştur ve gönder'),
           )
         else ...[
           if (!(b.isProjects && store.projectsOnLegacyCode))
@@ -319,7 +287,7 @@ Future<Board?> showJoinSheet(BuildContext context, RackStore store,
           if (!store.firebaseReady) throw 'İnternet / Firebase bağlantısı yok.';
           final d = await store.fetchShared(ctrl.text);
           if (d == null) {
-            error = 'Bu koda ait askılık bulunamadı. Kodu kontrol et.';
+            error = 'Bu bağlantıya ait askılık bulunamadı. Paylaşım kapatılmış olabilir; gönderen kişiye sor.';
           } else {
             found = d;
           }
@@ -348,9 +316,9 @@ Future<Board?> showJoinSheet(BuildContext context, RackStore store,
           store.projects.live.isNotEmpty;
 
       return _sheetFrame(ctx, [
-        Text('Kodla katıl', style: Theme.of(ctx).textTheme.titleLarge),
+        Text('Paylaşılan askılığa katıl', style: Theme.of(ctx).textTheme.titleLarge),
         const SizedBox(height: 4),
-        const Text('Sana gönderilen paylaşım kodunu yaz.',
+        const Text('Sana gönderilen bağlantıyı yapıştır (ya da sayfadaki kodu yaz).',
             style: TextStyle(color: Colors.black54)),
         const SizedBox(height: 14),
         Row(
@@ -361,10 +329,9 @@ Future<Board?> showJoinSheet(BuildContext context, RackStore store,
                 autofocus: true,
                 textCapitalization: TextCapitalization.characters,
                 onSubmitted: (_) => find(),
-                style: const TextStyle(
-                    fontSize: 20, letterSpacing: 2, fontFamily: 'monospace'),
+                style: const TextStyle(fontSize: 16),
                 decoration: const InputDecoration(
-                  hintText: 'K7P2-QX9M',
+                  hintText: 'Bağlantı ya da K7P2-QX9M',
                   border: OutlineInputBorder(),
                 ),
               ),
