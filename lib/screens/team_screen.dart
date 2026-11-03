@@ -3,6 +3,7 @@ import '../models/models.dart';
 import '../services/store.dart';
 import '../services/updater.dart';
 import '../widgets/people.dart';
+import 'admin_screen.dart';
 
 /// Ekip ayarları: kim kullanıyor (aktif kişi), isimler ve renkler.
 class TeamScreen extends StatelessWidget {
@@ -98,13 +99,13 @@ class TeamScreen extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         children: [
           _ProfileCard(store: store),
+          _AdminCard(store: store),
           const SizedBox(height: 18),
           _section('Arkadaşlarım', Icons.people_alt_outlined),
           _FriendsList(store: store),
           if (!store.projectsHidden) ...[
           const SizedBox(height: 22),
           _section('Proje ekibi (${store.projects.name})', Icons.groups_outlined),
-          _OwnerRow(store: store),
           const Padding(
             padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
             child: Text(
@@ -143,6 +144,8 @@ class TeamScreen extends StatelessWidget {
           const SizedBox(height: 22),
           const Divider(),
           const _VersionCard(),
+          const SizedBox(height: 8),
+          _AdminLogin(store: store),
         ],
       ),
     );
@@ -297,51 +300,98 @@ class _FriendsList extends StatelessWidget {
   }
 }
 
-/// Proje kodunun sahibi: göster ya da (sahipsizse) sahiplen.
-class _OwnerRow extends StatelessWidget {
+/// Yönetici: panele giriş · Kullanıcı: Projeler yetkisi bilgisi.
+class _AdminCard extends StatelessWidget {
   final RackStore store;
-  const _OwnerRow({required this.store});
+  const _AdminCard({required this.store});
 
   @override
   Widget build(BuildContext context) {
-    if (store.rackCode.isEmpty) return const SizedBox.shrink();
-    final owner = store.projectsOwner;
-    final mine = owner == store.profile.id;
-    return Card(
-      color: mine ? const Color(0xFFE2F3E5) : const Color(0xFFFFF8E7),
-      child: ListTile(
-        leading: Icon(owner == null
-            ? Icons.shield_outlined
-            : mine
-                ? Icons.verified_user
-                : Icons.lock_outline),
-        title: Text(owner == null
-            ? 'Bu askılığın sahibi yok'
-            : mine
-                ? 'Askılığın sahibi sensin'
-                : 'Sahibi: ${store.projectsOwnerName}'),
-        subtitle: Text(owner == null
-            ? 'Şu an katılan herkes her şeyi değiştirebilir. Sahiplenince adı, proje türlerini '
-                've kullanıcıları sadece sen değiştirirsin; silinen firmaları geri yüklersin.'
-            : mine
-                ? 'Diğerleri tik atar, firma ekler; askılığın ayarlarını sadece sen değiştirirsin.'
-                : 'Tik atabilir, firma ekleyip düzenleyebilirsin; ayarları sadece sahip değiştirir.'),
-        isThreeLine: true,
-        trailing: owner == null
-            ? FilledButton(
-                onPressed: () async {
-                  if (!await ensureProfile(context, store)) return;
-                  final ok = await store.claimProjects();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(ok
-                            ? 'Artık askılığın sahibi sensin 🔒'
-                            : 'Başka biri az önce sahiplendi.')));
-                  }
-                },
-                child: const Text('Sahibi benim'),
-              )
-            : null,
+    if (store.isAdmin) {
+      final n = store.pendingRequests.length;
+      return Card(
+        color: const Color(0xFFE2F3E5),
+        child: ListTile(
+          leading: const Icon(Icons.admin_panel_settings, color: Color(0xFF2E7D32)),
+          title: const Text('Yönetim paneli', style: TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text(n > 0
+              ? '$n onay bekleyen istek'
+              : '${store.users.where((u) => u.uid != store.uid).length} kullanıcı · Projeler yetkileri'),
+          trailing: n > 0 ? Badge(label: Text('$n')) : const Icon(Icons.chevron_right),
+          onTap: () => AdminScreen.open(context, store),
+        ),
+      );
+    }
+    if (store.legacyProjectsPending) {
+      return Card(
+        color: const Color(0xFFFFF1E6),
+        child: ListTile(
+          leading: const Icon(Icons.info_outline, color: Colors.deepOrange),
+          title: const Text('Projeler askılığın bekliyor'),
+          subtitle: const Text(
+              'Yöneticiysen aşağıdaki "Yönetici girişi" ile anahtarını gir; Projeler geri gelir '
+              've yetki paneli açılır. Değilsen yöneticinin sana yetki vermesini bekle.'),
+          isThreeLine: true,
+        ),
+      );
+    }
+    if (store.projectsLinked) {
+      return Card(
+        child: ListTile(
+          leading: const Icon(Icons.groups_outlined),
+          title: Text('"${store.projects.name}"'),
+          subtitle: Text(store.projectsAccess == 'edit'
+              ? 'Yönetici sana düzenleme yetkisi verdi.'
+              : 'Yönetici sana görüntüleme yetkisi verdi.'),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+}
+
+/// Yönetici girişi (anahtar bir kez girilir).
+class _AdminLogin extends StatelessWidget {
+  final RackStore store;
+  const _AdminLogin({required this.store});
+
+  @override
+  Widget build(BuildContext context) {
+    if (store.isAdmin || !store.signedIn) return const SizedBox.shrink();
+    return Center(
+      child: TextButton.icon(
+        style: TextButton.styleFrom(foregroundColor: Colors.black45),
+        icon: const Icon(Icons.key_outlined, size: 18),
+        label: const Text('Yönetici girişi'),
+        onPressed: () async {
+          final ctrl = TextEditingController();
+          final key = await showDialog<String>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Yönetici girişi'),
+              content: TextField(
+                controller: ctrl,
+                autofocus: true,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'Yönetici anahtarı'),
+                onSubmitted: (v) => Navigator.pop(ctx, v),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Vazgeç')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(ctx, ctrl.text),
+                    child: const Text('Giriş')),
+              ],
+            ),
+          );
+          ctrl.dispose();
+          if (key == null || key.trim().isEmpty) return;
+          final ok = await store.claimAdmin(key);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(ok ? 'Artık yöneticisin 🔑' : 'Anahtar yanlış.')));
+          }
+        },
       ),
     );
   }

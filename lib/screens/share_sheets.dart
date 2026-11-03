@@ -1,24 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import '../models/models.dart';
 import '../services/board.dart';
 import '../services/store.dart';
 import '../widgets/people.dart';
 
-const _apkUrl =
-    'https://github.com/emolibor/shake-rack/releases/download/latest/shake-rack.apk';
-
 String _inviteText(RackStore store, Board b) {
   final perm = b.shareCanEdit ? 'birlikte düzenleyebiliriz' : 'sadece inceleyebilirsin';
-  final link = store.inviteLink(b);
-  if (link.isNotEmpty) {
-    return '📌 Shake Rack\'te "${b.name}" askılığına seni davet ettim ($perm).\n\n'
-        'Katılmak için dokun:\n$link';
-  }
-  return '📌 Shake Rack\'te "${b.name}" askılığını seninle paylaştım ($perm).\n\n'
-      'Kod: ${b.shareCodePretty}\n\n'
-      'Uygulamada: Askılık → + Yeni → Kodla katıl\n'
-      'Uygulama yoksa indir: $_apkUrl';
+  return '📌 Shake Rack\'te "${b.name}" askılığına seni davet ettim ($perm).\n\n'
+      'Katılmak için dokun:\n${store.inviteLink(b)}';
 }
 
 Widget _sheetFrame(BuildContext ctx, List<Widget> children) => SafeArea(
@@ -34,6 +25,8 @@ Widget _sheetFrame(BuildContext ctx, List<Widget> children) => SafeArea(
         ),
       ),
     );
+
+String _err(Object e) => '$e'.replaceFirst('Bad state: ', '');
 
 // =====================================================================
 // Sahip: askılığı paylaş / izinleri değiştir / durdur
@@ -57,17 +50,20 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
         try {
           await job();
         } catch (e) {
-          error = '$e'.replaceFirst('Bad state: ', '');
+          error = _err(e);
         }
         if (ctx.mounted) setS(() => busy = false);
       }
 
       final shared = b.isShared;
+      final others = b.people.keys.where((id) => id != store.profile.id).length;
       return _sheetFrame(ctx, [
         Text('"${b.name}" askılığını paylaş',
             style: Theme.of(ctx).textTheme.titleLarge),
         const SizedBox(height: 4),
-        const Text('Bağlantıyı alan kişi kendi telefonunda bu askılığı görür.',
+        const Text(
+            'Bağlantıyı alan kişi katılma isteği gönderir; yönetici onaylayınca '
+            'askılık onun telefonunda belirir.',
             style: TextStyle(color: Colors.black54)),
         const SizedBox(height: 16),
         SegmentedButton<bool>(
@@ -96,41 +92,7 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
           title: const Text('Kendi askılığına kopyalayabilsin'),
           subtitle: const Text('Bağımsız bir kopya alır; senin askılığını etkilemez.'),
         ),
-        if (shared && b.isProjects && store.projectsOnLegacyCode) ...[
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF1E6),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Şu an "${b.shareCodePretty}" koduyla paylaşılıyor',
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 4),
-                const Text(
-                  'Bu kod tahmin edilebilir. Bağlantıya geçince eski kod kapanır, '
-                  'yalnızca bağlantıyı gönderdiğin kişiler girebilir. Şu an bağlı olanlar '
-                  'kendiliğinden yeni bağlantıya taşınır.',
-                  style: TextStyle(fontSize: 12.5, color: Colors.black54, height: 1.35),
-                ),
-                const SizedBox(height: 10),
-                FilledButton.icon(
-                  onPressed: busy
-                      ? null
-                      : () => run(() async {
-                            if (!await ensureProfile(context, store)) return;
-                            await store.migrateProjectsToLink();
-                          }),
-                  icon: const Icon(Icons.link),
-                  label: const Text('Bağlantıya geç'),
-                ),
-              ],
-            ),
-          ),
-        ] else if (shared) ...[
+        if (shared) ...[
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
@@ -155,8 +117,11 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 12.5, color: Color(0xFF2E6BB8))),
                       const SizedBox(height: 2),
-                      const Text('Sadece bu bağlantıyı gönderdiğin kişiler girebilir.',
-                          style: TextStyle(fontSize: 11.5, color: Colors.black45)),
+                      Text(
+                          others == 0
+                              ? 'Henüz katılan yok. Her katılım yönetici onayından geçer.'
+                              : '$others kişi katıldı. Yeni katılımlar yönetici onayından geçer.',
+                          style: const TextStyle(fontSize: 11.5, color: Colors.black45)),
                     ],
                   ),
                 ),
@@ -171,38 +136,6 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
                 ),
               ],
             ),
-          ),
-        ],
-        if (store.friends.values.any((f) => !b.people.containsKey(f.id))) ...[
-          const SizedBox(height: 12),
-          const Text('Arkadaşına doğrudan gönder',
-              style: TextStyle(fontWeight: FontWeight.w600)),
-          const Text('Bağlantı bile gerekmez; askılık onun telefonunda kendiliğinden belirir.',
-              style: TextStyle(fontSize: 12, color: Colors.black54)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              for (final f in store.friends.values.where((f) => !b.people.containsKey(f.id)))
-                ActionChip(
-                  avatar: PersonAvatar(person: f, size: 22),
-                  label: Text(f.name.isEmpty ? 'İsimsiz' : f.name),
-                  onPressed: busy
-                      ? null
-                      : () => run(() async {
-                            if (!await ensureProfile(context, store)) return;
-                            if (!b.isShared) {
-                              await store.shareBoard(b, canEdit: canEdit, allowCopy: allowCopy);
-                            }
-                            await store.inviteFriend(b, f);
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                  content: Text('${f.name} davet edildi 🤝')));
-                            }
-                          }),
-                ),
-            ],
           ),
         ],
         if (error != null)
@@ -227,7 +160,6 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
             label: const Text('Bağlantı oluştur ve gönder'),
           )
         else ...[
-          if (!(b.isProjects && store.projectsOnLegacyCode))
           FilledButton.icon(
             onPressed: busy ? null : () => Share.share(_inviteText(store, b), subject: b.name),
             icon: const Icon(Icons.ios_share),
@@ -262,14 +194,14 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
 }
 
 // =====================================================================
-// Alıcı: kodla katıl
+// Katılmak isteyen: bağlantıyla katılma isteği (yönetici onaylar)
 // =====================================================================
 Future<Board?> showJoinSheet(BuildContext context, RackStore store,
     {String? initialCode}) {
   final ctrl = TextEditingController(text: initialCode ?? '');
-  Map<String, dynamic>? found;
   var busy = false;
   var autoStarted = false;
+  JoinRequest? sent;
   String? error;
 
   return showModalBottomSheet<Board>(
@@ -277,126 +209,89 @@ Future<Board?> showJoinSheet(BuildContext context, RackStore store,
     isScrollControlled: true,
     showDragHandle: true,
     builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
-      Future<void> find() async {
+      Future<void> send() async {
         setS(() {
           busy = true;
           error = null;
-          found = null;
         });
         try {
-          if (!store.firebaseReady) throw 'İnternet / Firebase bağlantısı yok.';
-          final d = await store.fetchShared(ctrl.text);
-          if (d == null) {
-            error = 'Bu bağlantıya ait askılık bulunamadı. Paylaşım kapatılmış olabilir; gönderen kişiye sor.';
-          } else {
-            found = d;
+          if (!await ensureProfile(context, store)) {
+            setS(() => busy = false);
+            return;
           }
+          sent = await store.requestJoin(ctrl.text);
         } catch (e) {
-          error = '$e';
+          error = _err(e);
         }
         if (ctx.mounted) setS(() => busy = false);
       }
 
-      // davet bağlantısından geldiyse kodu hemen ara
+      // davet bağlantısından geldiyse isteği hemen gönder
       if (initialCode != null && !autoStarted) {
         autoStarted = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) => find());
+        WidgetsBinding.instance.addPostFrameCallback((_) => send());
       }
 
-      final d = found;
-      final canEdit = d?['permission'] != 'view';
-      final allowCopy = d?['allowCopy'] == true;
-      final isNotes = d?['kind'] == 'notes';
-      final isProj = d?['kind'] == 'projects';
-      final count = ((d?['cards'] as List?) ?? const [])
-          .where((c) => c is Map && c['deleted'] != true)
-          .length;
-      final replaces = isProj &&
-          store.rackCode != d?['_doc'] &&
-          store.projects.live.isNotEmpty;
-
+      final params = RackStore.linkParams(ctrl.text);
+      final r = sent;
       return _sheetFrame(ctx, [
         Text('Paylaşılan askılığa katıl', style: Theme.of(ctx).textTheme.titleLarge),
         const SizedBox(height: 4),
-        const Text('Sana gönderilen bağlantıyı yapıştır (ya da sayfadaki kodu yaz).',
+        const Text('Sana gönderilen bağlantıyı yapıştır. Yönetici onaylayınca askılık '
+            'kendiliğinden eklenir.',
             style: TextStyle(color: Colors.black54)),
         const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: ctrl,
-                autofocus: true,
-                textCapitalization: TextCapitalization.characters,
-                onSubmitted: (_) => find(),
-                style: const TextStyle(fontSize: 16),
-                decoration: const InputDecoration(
-                  hintText: 'Bağlantı ya da K7P2-QX9M',
-                  border: OutlineInputBorder(),
-                ),
-              ),
+        if (r == null) ...[
+          TextField(
+            controller: ctrl,
+            autofocus: initialCode == null,
+            onChanged: (_) => setS(() {}),
+            onSubmitted: (_) => send(),
+            style: const TextStyle(fontSize: 15),
+            decoration: const InputDecoration(
+              hintText: 'Davet bağlantısı',
+              border: OutlineInputBorder(),
             ),
-            const SizedBox(width: 8),
-            FilledButton(
-              onPressed: busy ? null : find,
-              child: busy
-                  ? const SizedBox(
-                      width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Bul'),
-            ),
-          ],
-        ),
-        if (error != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: Text(error!, style: const TextStyle(color: Colors.red)),
           ),
-        if (d != null) ...[
-          const SizedBox(height: 16),
+          if ((params['n'] ?? '').isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                  '"${params['n']}"${(params['o'] ?? '').isNotEmpty ? ' · ${params['o']} paylaştı' : ''}',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+            ),
+          if (error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(error!, style: const TextStyle(color: Colors.red)),
+            ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: busy || ctrl.text.trim().isEmpty ? null : send,
+            icon: busy
+                ? const SizedBox(
+                    width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.how_to_reg_outlined),
+            label: const Text('Katılma isteği gönder'),
+          ),
+        ] else ...[
           Card(
             margin: EdgeInsets.zero,
             color: const Color(0xFFFFF8E7),
             child: ListTile(
-              leading: Icon(isProj
-                  ? Icons.groups_outlined
-                  : isNotes
-                      ? Icons.sticky_note_2_outlined
-                      : Icons.checkroom),
-              title: Text('${d['name']}',
+              leading: const Icon(Icons.hourglass_top, color: Color(0xFFE09A2E)),
+              title: Text(r.boardName.isEmpty ? 'Katılma isteği gönderildi' : '"${r.boardName}"',
                   style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(
-                  '${d['ownerName'] ?? 'Biri'} paylaştı · $count ${isProj ? 'firma' : isNotes ? 'not' : 'kart'}\n'
-                  '${canEdit ? 'Düzenleyebilirsin' : 'Sadece inceleyebilirsin'}'),
+              subtitle: const Text('Yönetici onayı bekleniyor. Onaylanınca askılık '
+                  'Askılık sekmesinde kendiliğinden belirir; bu pencereyi kapatabilirsin.'),
               isThreeLine: true,
             ),
           ),
-          if (replaces)
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Text(
-                'Dikkat: Bu telefondaki "${store.projects.name}" askılığının yerini alır '
-                '(${store.projects.live.length} firma). Onları korumak istersen önce '
-                '"Kopyasını al" seç ya da paylaşanla birleştirin.',
-                style: const TextStyle(color: Colors.deepOrange, fontSize: 12.5),
-              ),
-            ),
           const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: () async {
-              if (!await ensureProfile(context, store)) return;
-              if (ctx.mounted) Navigator.pop(ctx, store.joinShared(d));
-            },
-            icon: Icon(canEdit ? Icons.group_add : Icons.visibility_outlined),
-            label: Text(canEdit ? 'Askılığa katıl (birlikte düzenle)' : 'Askılığa katıl (izle)'),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Tamam'),
           ),
-          if (allowCopy) ...[
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () => Navigator.pop(ctx, store.copyShared(d)),
-              icon: const Icon(Icons.copy_all),
-              label: const Text('Kopyasını kendi askılığıma ekle'),
-            ),
-          ],
         ],
       ]);
     }),
@@ -404,7 +299,7 @@ Future<Board?> showJoinSheet(BuildContext context, RackStore store,
 }
 
 // =====================================================================
-// Alıcı: paylaşılan askılığın bilgisi / kopyala / ayrıl
+// Katılan: paylaşılan askılığın bilgisi / kopyala / ayrıl
 // =====================================================================
 Future<void> showSharedInfoSheet(BuildContext context, RackStore store, Board b) {
   return showModalBottomSheet(

@@ -41,6 +41,9 @@ class Board {
   /// Paylaşan kişi paylaşımı kapattı → bu artık yerel kopya (bilgi bandı için).
   bool shareEnded = false;
 
+  /// Yeni (onaylı) paylaşım sistemi mi; eski sürüm paylaşımları taşınır.
+  bool shareV2 = false;
+
   /// Paylaşılan askılıktaki kişiler: profil kimliği → rol (owner/editor/viewer).
   Map<String, String> people = {};
 
@@ -160,7 +163,7 @@ class Board {
   /// Geri alınabilir silme: kart gizlenir, Geçmiş'ten geri yüklenebilir.
   void deleteCard(CompanyCard card) {
     // kimseyle paylaşılmayan askılıkta kalıcı sil (geri yükleyecek geçmiş yok)
-    final sharedBoard = isProjects ? store.rackCode.isNotEmpty : isShared;
+    final sharedBoard = isProjects ? store.projectsLinked : isShared;
     if (!sharedBoard) {
       cards.remove(card);
       _commit();
@@ -271,6 +274,7 @@ class Board {
         'shareCanEdit': shareCanEdit,
         'allowCopy': allowCopy,
         'shareEnded': shareEnded,
+        'shareV2': shareV2,
         'people': people,
         'log': log.map((e) => e.toJson()).toList(),
       };
@@ -321,6 +325,7 @@ class Board {
         ..shareCanEdit = j['shareCanEdit'] ?? true
         ..allowCopy = j['allowCopy'] ?? true
         ..shareEnded = j['shareEnded'] ?? false
+        ..shareV2 = j['shareV2'] ?? false
         ..people = Map<String, String>.from(j['people'] ?? const {})
         ..log = (j['log'] as List? ?? [])
             .map((e) => Activity.fromJson(Map<String, dynamic>.from(e)))

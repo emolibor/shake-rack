@@ -1,11 +1,96 @@
 rules_version = '2';
+// Shake Rack güvenlik kuralları.
+// __ADMIN_KEY__ yerine yönetici anahtarı yazılır; anahtar repoda tutulmaz,
+// sadece Firebase konsolundaki kurallarda durur.
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /racks/{rackId} {
-      // Anahtarı (belge kimliğini) bilen tek belgeyi okur/yazar.
-      allow get, create, update, delete: if rackId.size() >= 6;
-      // Listeleme kapalı: kimse tüm askılıkları dökemez.
-      allow list: if false;
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function adminPath() { return /databases/$(database)/documents/adminClaim/__ADMIN_KEY__; }
+    function isAdmin() {
+      return signedIn() && exists(adminPath()) && get(adminPath()).data.uid == me();
+    }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    // Yönetici kaydı: sadece doğru anahtarı bilen yazabilir.
+    match /adminClaim/{key} {
+      allow get: if signedIn() && key == '__ADMIN_KEY__';
+      allow create, update: if signedIn() && key == '__ADMIN_KEY__'
+        && request.resource.data.uid == me();
+    }
+
+    // Kullanıcılar: herkes kendi profilini yazar; Projeler yetkisini sadece yönetici yazar.
+    match /users/{uid} {
+      allow get: if signedIn() && (uid == me() || isAdmin());
+      allow list: if isAdmin();
+      allow create: if signedIn() && uid == me()
+        && !('projectsAccess' in request.resource.data);
+      allow update: if signedIn() && (
+        (uid == me() && !changed().hasAny(['projectsAccess']))
+        || (isAdmin() && changed().hasOnly(['projectsAccess'])));
+    }
+
+    // Yöneticinin Projeler askılığı: sadece yetki verilenler görür / düzenler.
+    match /projects/{pid} {
+      allow get: if isAdmin()
+        || (signedIn() && me() in resource.data.access);
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (signedIn() && me() in resource.data.access
+            && resource.data.access[me()] == 'edit'
+            && changed().hasOnly(['cards', 'log', 'updatedBy', 'updatedAt', 'revision']));
+    }
+
+    // Paylaşılan özel askılıklar: sadece sahibi ve onaylı üyeler görür.
+    // Yönetici içeriği GÖREMEZ.
+    match /shares/{sid} {
+      function isOwner() { return signedIn() && resource.data.owner == me(); }
+      function isMember() { return signedIn() && me() in resource.data.members; }
+      function roleAfter() { return request.resource.data.members[me()].role; }
+      function onlyMyEntry() {
+        return request.resource.data.members.diff(resource.data.members)
+          .affectedKeys().hasOnly([me()]);
+      }
+      function approvedJoin() {
+        let r = /databases/$(database)/documents/joinRequests/$(sid + '_' + me());
+        return exists(r) && get(r).data.status == 'approved';
+      }
+
+      allow get: if isOwner() || isMember();
+      allow create: if signedIn() && request.resource.data.owner == me()
+        && request.resource.data.members.keys().hasOnly([me()]);
+      allow delete: if isOwner();
+      allow update: if isOwner()
+        // düzenleyici: sadece içerik ve geçmiş
+        || (isMember() && resource.data.members[me()].role == 'editor'
+            && changed().hasOnly(['cards', 'log', 'updatedBy', 'updatedAt']))
+        // kendi kaydını güncelle (rolünü değiştirmeden) ya da ayrıl
+        || (isMember() && changed().hasOnly(['members']) && onlyMyEntry()
+            && (!(me() in request.resource.data.members)
+                || roleAfter() == resource.data.members[me()].role))
+        // yönetici onayladıysa kendini ekle; rol paylaşımın iznine uygun olmalı
+        || (signedIn() && !isMember() && approvedJoin()
+            && changed().hasOnly(['members']) && onlyMyEntry()
+            && ((resource.data.permission == 'edit' && roleAfter() == 'editor')
+                || (resource.data.permission != 'edit' && roleAfter() == 'viewer')));
+    }
+
+    // Katılma istekleri: kullanıcı kendi adına ister, yönetici onaylar / reddeder.
+    match /joinRequests/{rid} {
+      allow get: if signedIn() && (isAdmin()
+        || resource.data.uid == me() || resource.data.ownerUid == me());
+      allow list: if isAdmin() || (signedIn() && resource.data.uid == me());
+      allow create: if signedIn() && request.resource.data.uid == me()
+        && request.resource.data.status == 'pending'
+        && rid == request.resource.data.shareId + '_' + me();
+      allow update: if isAdmin() && changed().hasOnly(['status', 'decidedAt']);
+      allow delete: if signedIn() && (isAdmin() || resource.data.uid == me());
+    }
+
+    // Eski sürüm verisi: sadece yeni sisteme taşımak için okunur / silinir.
+    match /racks/{id} {
+      allow get, delete: if signedIn() && id.size() >= 6;
     }
   }
 }

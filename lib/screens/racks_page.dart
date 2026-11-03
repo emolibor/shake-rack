@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/models.dart';
 import '../services/board.dart';
 import '../services/store.dart';
 import '../widgets/rope_card.dart';
@@ -39,14 +40,17 @@ class _RacksPageState extends State<RacksPage> {
               boards: store.boards,
               selectedId: board?.id ?? '',
               onSelect: (b) => setState(() => _selected = b.id),
-              onEdit: (b) => (b.role == ShareRole.editor || b.role == ShareRole.viewer)
-                  ? showSharedInfoSheet(context, store, b)
-                  : (b.isProjects && !b.canManage)
-                      ? _projectsLockedSheet(context, store)
+              onEdit: (b) => b.isProjects
+                  ? (b.canManage
+                      ? BoardEditScreen.edit(context, store, b)
+                      : _projectsLockedSheet(context, store))
+                  : (b.role == ShareRole.editor || b.role == ShareRole.viewer)
+                      ? showSharedInfoSheet(context, store, b)
                       : BoardEditScreen.edit(context, store, b),
               onReorder: store.reorderBoards,
               onAdd: _create,
             ),
+            for (final r in store.myJoins.values) _JoinBanner(store: store, r: r),
             Expanded(
               child: board == null
                   ? _Welcome(onCreate: _create)
@@ -284,9 +288,10 @@ Future<void> _projectsLockedSheet(BuildContext context, RackStore store) {
             Text(store.projects.name, style: Theme.of(ctx).textTheme.titleLarge),
             const SizedBox(height: 6),
             Text(
-              'Bu askılığın sahibi ${store.projectsOwnerName}. Adını, proje türlerini ve '
-              'ekip kullanıcılarını sadece o değiştirebilir. Sen tik atabilir, firma '
-              'ekleyip düzenleyebilirsin.',
+              store.projectsAccess == 'edit'
+                  ? 'Bu askılık yöneticinin. Tik atabilir, firma ekleyip düzenleyebilirsin; '
+                      'adını, proje türlerini ve ekibi sadece yönetici değiştirir.'
+                  : 'Bu askılık yöneticinin. Sana görüntüleme yetkisi verildi; değişiklik yapamazsın.',
               style: const TextStyle(color: Colors.black54, height: 1.35),
             ),
             const SizedBox(height: 16),
@@ -297,11 +302,52 @@ Future<void> _projectsLockedSheet(BuildContext context, RackStore store) {
                 if (ctx.mounted) Navigator.pop(ctx);
               },
               icon: const Icon(Icons.visibility_off_outlined),
-              label: const Text('Bu telefondan kaldır (ekibin verisi silinmez)'),
+              label: const Text('Sekmeyi gizle (verilere dokunulmaz)'),
             ),
           ],
         ),
       ),
     ),
   );
+}
+
+/// Gönderdiğim katılma isteği: bekliyor / reddedildi.
+class _JoinBanner extends StatelessWidget {
+  final RackStore store;
+  final JoinRequest r;
+  const _JoinBanner({required this.store, required this.r});
+
+  @override
+  Widget build(BuildContext context) {
+    final rejected = r.status == 'rejected';
+    final name = r.boardName.isEmpty ? 'Paylaşılan askılık' : '"${r.boardName}"';
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+      decoration: BoxDecoration(
+        color: rejected ? const Color(0xFFFFF1F0) : const Color(0xFFFFF8E7),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: rejected ? const Color(0xFFF2C4C0) : const Color(0xFFE8DCC6)),
+      ),
+      child: Row(
+        children: [
+          Icon(rejected ? Icons.block : Icons.hourglass_top,
+              size: 18, color: rejected ? Colors.red : const Color(0xFFE09A2E)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              rejected
+                  ? '$name: katılma isteğin reddedildi.'
+                  : '$name: yönetici onayı bekleniyor.',
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+          TextButton(
+            onPressed: () => store.dismissJoin(r.shareId),
+            child: Text(rejected ? 'Kapat' : 'Vazgeç'),
+          ),
+        ],
+      ),
+    );
+  }
 }

@@ -7,6 +7,7 @@ import 'firebase_options.dart';
 import 'screens/chat_screen.dart';
 import 'screens/completed_screen.dart';
 import 'screens/history_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/racks_page.dart';
 import 'screens/team_screen.dart';
 import 'services/store.dart';
@@ -90,14 +91,11 @@ class _HomeState extends State<_Home> {
     if (uri.scheme != 'shakerack' || uri.host != 'join') return;
     final code = uri.queryParameters['k'] ?? '';
     if (code.isEmpty || !_handledLinks.add(code) || !mounted) return;
+    final link = uri.toString(); // k + askılık adı + paylaşan bilgisi
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       setState(() => _tabKey = 'rack');
-      final b = await showJoinSheet(context, store, initialCode: code);
-      if (b != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('"${b.name}" askılığına katıldın 🤝')));
-      }
+      await showJoinSheet(context, store, initialCode: link);
     });
   }
 
@@ -131,6 +129,8 @@ class _HomeState extends State<_Home> {
   }
 
   Widget _scaffold(BuildContext context) {
+    // kullanıcı adı zorunlu: girilmeden uygulamaya geçilmez
+    if (!store.hasProfile) return OnboardingScreen(store: store);
     final doneCount = store.unseenCompleted;
     // (anahtar, başlık, sayfa, alt menü öğesi)
     final tabs = <(String, String, Widget, NavigationDestination)>[
@@ -161,7 +161,14 @@ class _HomeState extends State<_Home> {
             const NavigationDestination(
                 icon: Icon(Icons.chat_bubble_outline), label: 'Mesaj')),
       ('profile', 'Profil', TeamScreen(key: const ValueKey('profile'), store: store),
-          const NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profil')),
+          NavigationDestination(
+            icon: Badge(
+              isLabelVisible: store.isAdmin && store.pendingRequests.isNotEmpty,
+              label: Text('${store.pendingRequests.length}'),
+              child: const Icon(Icons.person_outline),
+            ),
+            label: 'Profil',
+          )),
     ];
     var index = tabs.indexWhere((e) => e.$1 == _tabKey);
     if (index < 0) index = 0;

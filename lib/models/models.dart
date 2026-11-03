@@ -234,3 +234,90 @@ class Activity {
         item: '${j['item'] ?? ''}',
       );
 }
+
+/// Yönetim panelindeki bir kullanıcı.
+class AppUser {
+  final String uid;
+  final String name;
+  final String emoji;
+  final int color;
+  final String projectsAccess; // none / view / edit
+  final DateTime? lastSeen;
+
+  const AppUser({
+    required this.uid,
+    required this.name,
+    this.emoji = '',
+    this.color = 0xFF8B6A3E,
+    this.projectsAccess = 'none',
+    this.lastSeen,
+  });
+
+  Member get asMember => Member(id: uid, name: name, color: Color(color), emoji: emoji);
+
+  factory AppUser.fromDoc(String id, Map<String, dynamic> d) => AppUser(
+        uid: id,
+        name: '${d['name'] ?? ''}',
+        emoji: '${d['emoji'] ?? ''}',
+        color: (d['color'] as num?)?.toInt() ?? 0xFF8B6A3E,
+        projectsAccess: '${d['projectsAccess'] ?? 'none'}',
+        lastSeen: _ts(d['lastSeen']),
+      );
+}
+
+/// Bir kullanıcının paylaşılan askılığa katılma isteği (yönetici onaylar).
+class JoinRequest {
+  final String id; // <paylaşımKodu>_<uid>
+  final String shareId;
+  final String uid;
+  final String name;
+  final String emoji;
+  final int color;
+  final String boardName;
+  final String ownerName;
+  final String ownerUid;
+  final String status; // pending / approved / rejected
+  final DateTime? createdAt;
+
+  const JoinRequest({
+    required this.id,
+    required this.shareId,
+    required this.uid,
+    required this.name,
+    this.emoji = '',
+    this.color = 0xFF8B6A3E,
+    required this.boardName,
+    required this.ownerName,
+    this.ownerUid = '',
+    required this.status,
+    this.createdAt,
+  });
+
+  Member get requester => Member(id: uid, name: name, color: Color(color), emoji: emoji);
+
+  factory JoinRequest.fromDoc(String id, Map<String, dynamic> d) => JoinRequest(
+        id: id,
+        shareId: '${d['shareId'] ?? ''}',
+        uid: '${d['uid'] ?? ''}',
+        name: '${d['name'] ?? ''}',
+        emoji: '${d['emoji'] ?? ''}',
+        color: (d['color'] as num?)?.toInt() ?? 0xFF8B6A3E,
+        boardName: '${d['boardName'] ?? ''}',
+        ownerName: '${d['ownerName'] ?? ''}',
+        ownerUid: '${d['ownerUid'] ?? ''}',
+        status: '${d['status'] ?? 'pending'}',
+        createdAt: _ts(d['createdAt']),
+      );
+}
+
+/// Firestore Timestamp / ISO metin → DateTime (bağımlılıksız).
+DateTime? _ts(dynamic v) {
+  if (v == null) return null;
+  if (v is String) return DateTime.tryParse(v);
+  try {
+    // cloud_firestore Timestamp
+    return (v as dynamic).toDate() as DateTime;
+  } catch (_) {
+    return null;
+  }
+}

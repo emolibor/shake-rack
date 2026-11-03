@@ -66,13 +66,16 @@
   }
   if (n) $('title').textContent = '"' + n + '" askılığına davet';
   $('desc').textContent = (o ? o + ' seninle bir askılık paylaştı. ' : '') +
-      'Uygulamada açınca katılma ekranı hazır gelir.';
-  $('codebox').innerHTML = 'Açılmazsa uygulamada <strong>+ Yeni → Kodla katıl</strong> ile bu kodu yaz:<br><b>' +
-      k.slice(0, 4) + '-' + k.slice(4) + '</b>';
+      'Uygulamada açınca katılma isteğin gönderilir; yönetici onaylayınca askılık sende belirir.';
+  $('codebox').innerHTML = 'Açılmazsa bu sayfanın bağlantısını kopyala, uygulamada ' +
+      '<strong>+ Yeni → Paylaşılan askılığa katıl</strong> kutusuna yapıştır.';
 
   var android = /android/i.test(navigator.userAgent);
-  var deep = 'shakerack://join?k=' + k;
-  var intent = 'intent://join?k=' + k +
+  var extra = (n ? '&n=' + encodeURIComponent(n) : '') +
+      (o ? '&o=' + encodeURIComponent(o) : '') +
+      (q.get('u') ? '&u=' + encodeURIComponent(q.get('u')) : '');
+  var deep = 'shakerack://join?k=' + k + extra;
+  var intent = 'intent://join?k=' + k + extra +
       '#Intent;scheme=shakerack;package=com.fourmis.shake_rack;' +
       'S.browser_fallback_url=' + encodeURIComponent(apk) + ';end';
   $('open').href = android ? intent : deep;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/board.dart';
 import '../services/store.dart';
+import 'admin_screen.dart';
 import 'share_sheets.dart';
 
 /// Şablondaki bir madde; `orig` düzenlemeden önceki adı (yeni eklenense null).
@@ -125,7 +126,7 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
 
   Future<void> _delete() async {
     final b = widget.board!;
-    final synced = widget.store.rackCode.isNotEmpty;
+    final synced = widget.store.projectsLinked;
     final String body;
     if (b.isProjects) {
       body = synced
@@ -179,12 +180,17 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
       appBar: AppBar(
         title: Text(title),
         actions: [
-          if (!_isNew)
+          if (!_isNew && (!_isProjects || widget.store.isAdmin))
             IconButton(
-              tooltip: 'Paylaş',
+              tooltip: _isProjects ? 'Kimler erişebilir' : 'Paylaş',
               icon: Icon(widget.board!.isShared ? Icons.people_alt : Icons.ios_share),
               onPressed: () async {
-                await showShareSheet(context, widget.store, widget.board!);
+                if (widget.board!.isProjects) {
+                  // Projeler kişi kişi yönetim panelinden yetkilendirilir
+                  await AdminScreen.open(context, widget.store);
+                } else {
+                  await showShareSheet(context, widget.store, widget.board!);
+                }
                 if (mounted) setState(() {});
               },
             ),

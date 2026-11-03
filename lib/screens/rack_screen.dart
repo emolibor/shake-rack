@@ -398,7 +398,19 @@ class _StatusBand extends StatelessWidget {
     final c = Colors.brown.shade400;
     late final IconData icon;
     late final String text;
-    if (board.shareEnded && !board.isShared) {
+    if (board.isProjects && board.isShared) {
+      final n = board.people.keys.where((id) => id != store.profile.id).length;
+      icon = board.role == ShareRole.owner
+          ? Icons.admin_panel_settings_outlined
+          : board.canEdit
+              ? Icons.people_alt_outlined
+              : Icons.visibility_outlined;
+      text = board.role == ShareRole.owner
+          ? (n == 0 ? 'Yöneticisin · henüz kimseye yetki vermedin' : 'Yöneticisin · $n kişi yetkili')
+          : board.canEdit
+              ? 'Yöneticinin askılığı · düzenleyebilirsin'
+              : 'Yöneticinin askılığı · sadece görüntüleme';
+    } else if (board.shareEnded && !board.isShared) {
       icon = Icons.link_off;
       text = 'Paylaşım sonlandırıldı · bu artık senin kopyan';
     } else if (!board.isShared) {

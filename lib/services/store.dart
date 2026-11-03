@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -11,9 +12,10 @@ import 'board.dart';
 /// Tüm uygulama durumu.
 ///
 /// - Her değişiklik önce yerelde (shared_preferences) saklanır → çevrimdışı çalışır.
-/// - **Projeler** askılığı ve kullanıcı listesi, bir "askılık kodu" girildiyse
-///   Firestore'da `racks/{kod}` belgesine yazılır → grup aynı ipi görür.
-/// - **Özel askılıklar** yalnızca bu telefonda saklanır; buluta hiç gönderilmez.
+/// - **Projeler** yöneticinin askılığıdır; yönetici kişi kişi görme/düzenleme
+///   yetkisi verir (sunucu kuralları uygular).
+/// - **Özel askılıklar** yalnızca bu telefonda saklanır; paylaşılırsa her
+///   katılım için yönetici onayı gerekir. Yönetici içeriklerini göremez.
 class RackStore extends ChangeNotifier {
   static const _kCards = 'cards_v1'; // Projeler askılığının kartları
   static const _kCustom = 'custom_boards_v1'; // özel askılıklar (yerel)
@@ -34,6 +36,9 @@ class RackStore extends ChangeNotifier {
   static const _kProjectsUsed = 'projects_used_v1';
   static const _kProjectsPerm = 'projects_perm_v1';
   static const _kProjectsCopy = 'projects_copy_v1';
+  static const _kAdminKey = 'admin_key_v1';
+  static const _kLegacyPending = 'legacy_projects_pending_v1';
+  static const _kProjectsAccess = 'projects_access_v1';
 
   final _uuid = const Uuid();
 
@@ -63,9 +68,9 @@ class RackStore extends ChangeNotifier {
   /// adını, proje türlerini, ekip kullanıcılarını değiştirir, silinenleri geri yükler.
   String? projectsOwner;
 
-  /// Kod yoksa (yalnız kullanım) ya da sahip belirlenmemişse herkes yönetir.
-  bool get canManageProjects =>
-      rackCode.isEmpty || projectsOwner == null || projectsOwner == profile.id;
+  /// Projeler'i (ad, türler, ekip) sadece yönetici yönetir; bulutla eşitlenmeyen
+  /// yerel bir Projeler'i sahibi yönetir.
+  bool get canManageProjects => isAdmin || !projectsLinked;
 
   /// Projeler askılığının işlem geçmişi (ekip koduyla eşitlenir).
   List<Activity> projectsLog = [];
@@ -150,10 +155,9 @@ class RackStore extends ChangeNotifier {
   bool toggleItem(CompanyCard card, ProjectItem item) =>
       projects.toggleItem(card, item);
 
-  /// Paylaşılan askılık kodu (ör. "ekip-2026"). Boşsa sadece yerel.
+  /// Eski sürümün ekip kodu (sadece taşıma için okunur).
   String rackCode = '';
   bool firebaseReady = false; // Firebase.initializeApp başarılı mı
-  bool get syncing => firebaseReady && rackCode.isNotEmpty;
   String syncStatus = 'Yerel';
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _sub;
@@ -232,6 +236,9 @@ class RackStore extends ChangeNotifier {
     currentMemberId = p.getString(_kCurrent) ?? 'me';
     if (memberById(currentMemberId) == null) currentMemberId = members.first.id;
     rackCode = p.getString(_kRackCode) ?? '';
+    adminKey = p.getString(_kAdminKey);
+    legacyProjectsPending = p.getBool(_kLegacyPending) ?? false;
+    projectsAccess = p.getString(_kProjectsAccess) ?? 'none';
     deviceId = p.getString(_kDeviceId) ?? '';
     if (deviceId.isEmpty) {
       deviceId = _uuid.v4();
@@ -240,11 +247,7 @@ class RackStore extends ChangeNotifier {
     _syncProjectsShareState();
     if (renamed || fresh) await _saveLocal();
     notifyListeners();
-    if (rackCode.isNotEmpty) _listen();
-    for (final b in custom) {
-      if (b.isShared) _listenShared(b);
-    }
-    _listenProfile();
+    unawaited(_startCloud());
   }
 
   /// "Ben"/"Arkadaşım" gibi eski varsayılan adları "Kullanıcı 1/2" yap.
@@ -287,6 +290,13 @@ class RackStore extends ChangeNotifier {
         _kMembers, jsonEncode(members.map((e) => e.toJson()).toList()));
     await p.setString(_kCurrent, currentMemberId);
     await p.setString(_kRackCode, rackCode);
+    if (adminKey == null) {
+      await p.remove(_kAdminKey);
+    } else {
+      await p.setString(_kAdminKey, adminKey!);
+    }
+    await p.setBool(_kLegacyPending, legacyProjectsPending);
+    await p.setString(_kProjectsAccess, projectsAccess);
   }
 
   /// Grupla paylaşılan veri. Özel askılıklar burada YOK.
@@ -295,13 +305,6 @@ class RackStore extends ChangeNotifier {
         'members': members.map((e) => e.toJson()).toList(),
         'projectTypes': projects.template,
         'projectsName': projects.name,
-      };
-
-  Map<String, dynamic> _toCloud() => {
-        ...sharedJson(),
-        'revision': _revision,
-        'updatedAt': FieldValue.serverTimestamp(),
-        'updatedBy': deviceId,
       };
 
   void _applyCloud(Map<String, dynamic> d) {
@@ -322,12 +325,320 @@ class RackStore extends ChangeNotifier {
     _revision = (d['revision'] as int?) ?? _revision;
   }
 
+  // =====================================================================
+  // BULUT — kimlik, yönetici, Projeler yetkisi, onaylı paylaşım
+  // =====================================================================
+  //
+  // Firestore yapısı (kurallar sunucuda uygulanır, bkz. firestore.rules):
+  //   users/{uid}             profil (ad, emoji, renk) + projectsAccess (yönetici yazar)
+  //   adminClaim/{gizliAnahtar}  {uid}: yöneticinin kim olduğu
+  //   projects/main           yöneticinin Projeler askılığı + access {uid: view|edit}
+  //   shares/{KOD}            paylaşılan özel askılık + members {uid: {ad, rol}}
+  //   joinRequests/{KOD_uid}  katılma isteği (yönetici onaylar)
+  //   racks/*                 eski sürüm verisi (sadece taşıma için okunur/silinir)
+
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
+
+  /// Giriş yapılmış kimlik (anonim). Boşsa bulut kapalı.
+  String uid = '';
+  bool get signedIn => uid.isNotEmpty;
+
+  /// Yönetici mi (adminClaim/{adminKey}.uid == uid).
+  bool isAdmin = false;
+  String? adminKey;
+
+  /// Yönetici değilse: yöneticinin Projeler'ine erişim (none / view / edit).
+  String projectsAccess = 'none';
+
+  /// Eski sürümden kalan Projeler verisi yönetici girişini bekliyor.
+  bool legacyProjectsPending = false;
+
+  /// Projeler bulutla eşitleniyor mu (yönetici ya da yetki verilmiş kullanıcı).
+  bool get projectsLinked => isAdmin || projectsAccess != 'none';
+
+  /// Yönetim paneli verileri (sadece yöneticide dolar).
+  List<AppUser> users = [];
+  List<JoinRequest> pendingRequests = [];
+
+  /// Benim katılma isteklerim (paylaşım kodu → istek).
+  Map<String, JoinRequest> myJoins = {};
+
+  StreamSubscription? _meSub, _usersSub, _pendingSub, _myJoinsSub;
+
   DocumentReference<Map<String, dynamic>> get _doc =>
-      FirebaseFirestore.instance.collection('racks').doc(rackCode);
+      _db.collection('projects').doc('main');
+  DocumentReference<Map<String, dynamic>> _shareDoc(String code) =>
+      _db.collection('shares').doc(code.toUpperCase());
+  DocumentReference<Map<String, dynamic>> _userDoc(String id) =>
+      _db.collection('users').doc(id);
+
+  /// Açılışta: anonim giriş → profil kaydı → yönetici/yetki dinleme → eşitleme.
+  Future<void> _startCloud() async {
+    if (!firebaseReady) return;
+    try {
+      final auth = FirebaseAuth.instance;
+      final user = auth.currentUser ?? (await auth.signInAnonymously()).user;
+      if (user == null) return;
+      uid = user.uid;
+    } catch (e) {
+      syncStatus = 'Hata: giriş yapılamadı (Firebase → Anonymous açık mı?)';
+      notifyListeners();
+      return;
+    }
+    if (profile.id != uid) {
+      profile = Member(id: uid, name: profile.name, color: profile.color, emoji: profile.emoji);
+      await _saveLocal();
+    }
+    await _publishProfile();
+    // yönetici mi?
+    if (adminKey != null) {
+      try {
+        final s = await _db.collection('adminClaim').doc(adminKey).get();
+        isAdmin = s.data()?['uid'] == uid;
+      } catch (_) {
+        isAdmin = false;
+      }
+    }
+    await _migrateLegacy();
+    if (isAdmin) {
+      await _becomeAdmin();
+    } else {
+      _listenMe();
+    }
+    _listenMyJoins();
+    for (final b in custom) {
+      if (b.isShared) _listenShared(b);
+    }
+    notifyListeners();
+  }
+
+  Future<void> _publishProfile() async {
+    if (!signedIn || !hasProfile) return;
+    try {
+      await _userDoc(uid).set({
+        'name': profile.name,
+        'emoji': profile.emoji,
+        'color': profile.color.value,
+        'lastSeen': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (_) {}
+  }
+
+  // ---------- eski sürümden geçiş ----------
+
+  /// Eski "racks" verisi: paylaşılan özel askılıklar yeni sisteme taşınır
+  /// (sahipse aynı kodla yeniden paylaşılır, katılanlar yeniden onay ister),
+  /// Projeler'in eski bağlantısı kapanır, veri yönetici girişini bekler.
+  Future<void> _migrateLegacy() async {
+    var changed = false;
+    for (final b in custom.where((b) => b.isShared && !b.shareV2).toList()) {
+      final code = b.shareCode!;
+      if (b.role == ShareRole.owner) {
+        try {
+          await _db.collection('racks').doc('share_${code.toLowerCase()}').delete();
+        } catch (_) {}
+        b.people = {};
+        try {
+          await _createShare(b, code: code, canEdit: b.shareCanEdit, allowCopy: b.allowCopy);
+        } catch (_) {
+          b.shareCode = null;
+          b.role = null;
+        }
+      } else {
+        b.shareCode = null;
+        b.role = null;
+        b.shareEnded = true;
+      }
+      changed = true;
+    }
+    if (rackCode.isNotEmpty && !isAdmin && projectsAccess == 'none' && !legacyProjectsPending) {
+      // eski ekip kodu: veri kalsın, yönetici girişi gelirse buluta taşınır
+      legacyProjectsPending = projects.live.isNotEmpty;
+      if (legacyProjectsPending) projectsHidden = true;
+      changed = true;
+    }
+    if (changed) await _saveLocal();
+  }
+
+  /// Eski ekip kodu belgesini sil (yönetici, taşıdıktan sonra).
+  Future<void> _dropLegacyRack() async {
+    if (rackCode.isEmpty) return;
+    try {
+      await _db.collection('racks').doc(rackCode).delete();
+    } catch (_) {}
+    rackCode = '';
+  }
+
+  // ---------- yönetici ----------
+
+  /// Yönetici anahtarını gir (bir kez). Doğruysa bu telefon yönetici olur.
+  Future<bool> claimAdmin(String key) async {
+    if (!signedIn) throw StateError('Önce internete bağlan.');
+    final k = key.trim();
+    if (k.isEmpty) return false;
+    try {
+      await _db.collection('adminClaim').doc(k).set({'uid': uid, 'name': profile.name});
+    } catch (_) {
+      return false; // kural reddetti: anahtar yanlış
+    }
+    adminKey = k;
+    isAdmin = true;
+    _meSub?.cancel();
+    legacyProjectsPending = false;
+    await _becomeAdmin();
+    await _saveLocal();
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> _becomeAdmin() async {
+    projectsEverUsed = true;
+    legacyProjectsPending = false;
+    if (projectsHidden && projects.live.isNotEmpty) projectsHidden = false;
+    // Projeler belgesi yoksa yereldekinden oluştur
+    try {
+      final s = await _doc.get();
+      if (!s.exists) {
+        await _doc.set({
+          ...sharedJson(),
+          'owner': uid,
+          'ownerName': profile.name,
+          'access': <String, String>{},
+          'people': {uid: _meEntry(ShareRole.owner)},
+          'log': projectsLog.map((e) => e.toJson()).toList(),
+          'updatedBy': deviceId,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (_) {}
+    await _dropLegacyRack();
+    _syncProjectsShareState();
+    _listen();
+    _usersSub?.cancel();
+    _usersSub = _db.collection('users').snapshots().listen((q) {
+      users = q.docs.map((d) => AppUser.fromDoc(d.id, d.data())).toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      notifyListeners();
+    }, onError: (_) {});
+    _pendingSub?.cancel();
+    _pendingSub = _db
+        .collection('joinRequests')
+        .where('status', isEqualTo: 'pending')
+        .snapshots()
+        .listen((q) {
+      pendingRequests = q.docs.map((d) => JoinRequest.fromDoc(d.id, d.data())).toList()
+        ..sort((a, b) => (a.createdAt ?? DateTime(2000)).compareTo(b.createdAt ?? DateTime(2000)));
+      notifyListeners();
+    }, onError: (_) {});
+  }
+
+  /// Yönetici: bir kullanıcıya Projeler yetkisi ver / değiştir / kaldır.
+  Future<void> setProjectsAccess(AppUser u, String access) async {
+    if (!isAdmin) return;
+    final batch = _db.batch();
+    if (access == 'none') {
+      batch.update(_doc, {
+        'access.${u.uid}': FieldValue.delete(),
+        'people.${u.uid}': FieldValue.delete(),
+      });
+    } else {
+      batch.update(_doc, {
+        'access.${u.uid}': access,
+        'people.${u.uid}': {
+          'name': u.name,
+          'color': u.color,
+          'emoji': u.emoji,
+          'role': access == 'edit' ? 'editor' : 'viewer',
+        },
+      });
+    }
+    batch.update(_userDoc(u.uid), {'projectsAccess': access});
+    await batch.commit();
+  }
+
+  /// Yönetici: katılma isteğini onayla / reddet.
+  Future<void> decideJoin(JoinRequest r, bool approve) async {
+    if (!isAdmin) return;
+    await _db.collection('joinRequests').doc(r.id).update({
+      'status': approve ? 'approved' : 'rejected',
+      'decidedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // ---------- Projeler (yöneticinin askılığı) ----------
+
+  /// Yönetici değilsem: kendi kullanıcı belgemden Projeler yetkimi dinle.
+  void _listenMe() {
+    _meSub?.cancel();
+    _meSub = _userDoc(uid).snapshots().listen((s) async {
+      final a = '${s.data()?['projectsAccess'] ?? 'none'}';
+      if (a == projectsAccess) return;
+      applyProjectsAccess(a);
+      await _saveLocal();
+    }, onError: (_) {});
+  }
+
+  /// Yöneticinin verdiği Projeler yetkisini uygula (none / view / edit).
+  void applyProjectsAccess(String a) {
+    final before = projectsLinked;
+    projectsAccess = a;
+    if (projectsLinked && !before) {
+      // yetki verildi → Projeler belirir (eski yerel kopyanın yerini alır)
+      legacyProjectsPending = false;
+      rackCode = '';
+      projectsHidden = false;
+      projectsEverUsed = true;
+      _syncProjectsShareState();
+      _listen();
+    } else if (!projectsLinked && before) {
+      // yetki kaldırıldı → Projeler bu telefondan kalkar
+      _sub?.cancel();
+      _sub = null;
+      projects.cards = [];
+      projectsLog = [];
+      projectsHidden = true;
+      syncStatus = 'Yerel';
+    }
+    _syncProjectsShareState();
+    notifyListeners();
+  }
+
+  /// Projeler'in paylaşım durumu (rol, kişiler).
+  void _syncProjectsShareState() {
+    if (!projectsLinked) {
+      projects.shareCode = null;
+      projects.role = null;
+      projects.people = {};
+      return;
+    }
+    projects.shareCode = 'PROJECTS';
+    projects.shareV2 = true;
+    projects.role = isAdmin
+        ? ShareRole.owner
+        : (projectsAccess == 'edit' ? ShareRole.editor : ShareRole.viewer);
+    projects.shareCanEdit = projectsAccess == 'edit' || isAdmin;
+  }
+
+  bool get syncing => firebaseReady && signedIn && projectsLinked;
+
+  Map<String, dynamic> _toCloud() => isAdmin
+      ? {
+          ...sharedJson(),
+          'revision': _revision,
+          'updatedAt': FieldValue.serverTimestamp(),
+          'updatedBy': deviceId,
+        }
+      : {
+          // yetkili kullanıcı sadece kartları yazar (kurallar ayarları korur)
+          'cards': projects.cards.map((e) => e.toJson()).toList(),
+          'revision': _revision,
+          'updatedAt': FieldValue.serverTimestamp(),
+          'updatedBy': deviceId,
+        };
 
   /// Yazmaları 300 ms toplayıp tek seferde gönderir (hızlı tik atmalarda).
   void _pushCloud() {
-    if (!syncing) return;
+    if (!syncing || !projects.canEdit) return;
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), () async {
       _revision++;
@@ -335,7 +646,7 @@ class RackStore extends ChangeNotifier {
         await _doc.set(_toCloud(), SetOptions(merge: true));
         syncStatus = 'Eşitlendi';
       } catch (e) {
-        syncStatus = 'Bağlantı yok (yerelde saklandı)';
+        syncStatus = 'Kaydedilemedi (yetki / bağlantı)';
       }
       notifyListeners();
     });
@@ -347,66 +658,32 @@ class RackStore extends ChangeNotifier {
     syncStatus = 'Bağlanıyor…';
     notifyListeners();
     _sub = _doc.snapshots().listen((snap) async {
-      if (!snap.exists) {
-        // Önbellekte yoksa sunucuyu bekle; sunucuda yoksa paylaşım kapatılmış.
-        if (snap.metadata.isFromCache) return;
-        await _detachProjects();
-        return;
-      }
-      final d = snap.data()!;
-      // eski kod bağlantıya taşındıysa: yeni belgeye geç
-      final moved = d['movedTo'];
-      if (moved is String && moved.isNotEmpty && moved != rackCode) {
-        rackCode = moved;
-        await _saveLocal();
-        _listen();
-        return;
-      }
-      // sahip, izinler, kişiler ve geçmiş her zaman okunur
-      projectsOwner = d['owner'] as String?;
-      projectsPermission = d['permission'] == 'view' ? 'view' : 'edit';
-      projectsAllowCopy = d['allowCopy'] ?? true;
-      projectsLog = _parseLog(d['log']);
-      _absorbMembers(projects, d['people']);
-      _syncProjectsShareState();
-      _trimLog(_doc, projectsLog, isOwner: projectsOwner == profile.id);
-      // Kendi yazdığımız sürümü geri okuma; diğer telefonun yazdığını uygula.
-      // Bizim gönderilmeyi bekleyen değişikliğimiz varsa onu ezme.
-      final pending = _debounce?.isActive ?? false;
-      if (d['updatedBy'] != deviceId && !pending) {
-        _applyCloud(d);
-        if (_migrateMemberNames()) _pushCloud();
-        if (memberById(currentMemberId) == null) {
-          currentMemberId = members.first.id;
-        }
-        await _saveLocal();
-      }
+      if (!snap.exists) return;
+      applyProjectsSnapshot(snap.data()!, pending: _debounce?.isActive ?? false);
+      if (isAdmin) _trimLog(_doc, projectsLog, isOwner: true);
+      await _saveLocal();
       syncStatus = snap.metadata.isFromCache ? 'Çevrimdışı' : 'Eşitlendi';
       notifyListeners();
     }, onError: (_) {
-      syncStatus = 'Hata: Firestore kuralları / internet';
+      syncStatus = 'Erişim yok';
       notifyListeners();
     });
   }
 
-  /// Askılık koduna katıl veya ayrıl (boş kod = sadece yerel).
-  Future<void> setRackCode(String code) async {
-    rackCode =
-        code.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9\-_]'), '-');
-    projectsOwner = null; // yeni kodun sahibi/geçmişi buluttan gelir
-    projectsLog = [];
-    await _saveLocal();
-    _sub?.cancel();
-    _sub = null;
-    if (rackCode.isEmpty) {
-      syncStatus = 'Yerel';
-      notifyListeners();
-      return;
+  /// Projeler belgesinin son halini uygula (içerik, kişiler, geçmiş).
+  void applyProjectsSnapshot(Map<String, dynamic> d, {bool pending = false}) {
+    projectsOwner = d['owner'] as String?;
+    projectsLog = _parseLog(d['log']);
+    _absorbMembers(projects, d['people']);
+    _syncProjectsShareState();
+    if (d['updatedBy'] != deviceId && !pending) {
+      _applyCloud(d);
+      if (memberById(currentMemberId) == null) currentMemberId = members.first.id;
     }
-    _listen();
+    notifyListeners();
   }
 
-  /// Board değişince çağrılır. Projeler grup belgesine, paylaşılan özel
+  /// Board değişince çağrılır. Projeler kendi belgesine, paylaşılan özel
   /// askılıklar kendi paylaşım belgesine gider; diğerleri sadece yerelde kalır.
   void boardChanged(Board b) {
     notifyListeners();
@@ -424,26 +701,19 @@ class RackStore extends ChangeNotifier {
     return b;
   }
 
-  /// Askılığı güncelle. Projeler'in adı sabit, maddeleri düzenlenebilir
-  /// (grupla eşitlenir). renames: şablonda adı değişen maddeler (eski → yeni),
-  /// kartlardaki aynı maddeler de yeniden adlandırılır.
+  /// Askılığı güncelle (sadece yöneten). renames: adı değişen maddeler.
   void updateBoard(Board b,
       {String? name, List<String>? template, Map<String, String> renames = const {}}) {
-    if (!b.canManage) return; // sadece askılık sahibi
+    if (!b.canManage) return;
     if (name != null && name.trim().isNotEmpty) b.name = name.trim();
     if (template != null && template.isNotEmpty) b.template = template;
     b.applyRenames(renames);
     boardChanged(b);
   }
 
-  /// Askılığı sil. Paylaşan sahipse paylaşım da kapanır; alıcıysa sadece
-  /// kendi telefonundan çıkar.
+  /// Askılığı sil. Paylaşan sahipse paylaşım da kapanır; katılansa ayrılır.
   Future<void> deleteBoard(Board b) async {
-    if (b.isProjects) {
-      final r = projects.role;
-      if (r == ShareRole.editor || r == ShareRole.viewer) return leaveProjects();
-      return hideProjects();
-    }
+    if (b.isProjects) return hideProjects();
     if (b.isShared && b.role == ShareRole.owner) await stopSharing(b);
     if (b.isShared && b.role != ShareRole.owner) await _leaveMembers(b);
     _unlistenShared(b);
@@ -453,9 +723,7 @@ class RackStore extends ChangeNotifier {
     await _saveLocal();
   }
 
-  // ---------- askılık paylaşma ----------
-  // Paylaşılan askılık, Firestore'da racks/share_<kod> belgesinde durur
-  // (mevcut güvenlik kuralının içinde kalır). Kodu bilen katılabilir.
+  // ---------- askılık paylaşma (her katılım yönetici onaylı) ----------
 
   static const _codeChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   final Map<String, StreamSubscription> _shareSubs = {};
@@ -466,49 +734,98 @@ class RackStore extends ChangeNotifier {
     return List.generate(8, (_) => _codeChars[r.nextInt(_codeChars.length)]).join();
   }
 
-  /// Kullanıcının yazdığı kodu sadeleştir: "k7p2-qx9m " → "K7P2QX9M"
+  /// "k7p2-qx9m " → "K7P2QX9M"
   static String normalizeCode(String s) =>
       s.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
 
-  DocumentReference<Map<String, dynamic>> _shareDoc(String code) =>
-      FirebaseFirestore.instance
-          .collection('racks')
-          .doc('share_${code.toLowerCase()}');
+  /// Yapıştırılan bağlantıdan kodu çıkar ("…/katil/?k=K7P2QX9M&n=…" → "K7P2QX9M").
+  static String extractCode(String raw) {
+    final m = RegExp(r'[?&]k=([A-Za-z0-9\-]+)').firstMatch(raw);
+    return m != null ? m.group(1)! : raw;
+  }
 
-  /// Askılığı paylaş (ya da izinlerini güncelle). Kodu döner.
-  Future<String> shareBoard(Board b,
-      {required bool canEdit, required bool allowCopy}) async {
-    if (!firebaseReady) {
-      throw StateError('Paylaşım için internet / Firebase gerekli.');
+  /// Bağlantıdaki diğer bilgiler (askılık adı, paylaşan, paylaşanın kimliği).
+  static Map<String, String> linkParams(String raw) {
+    final i = raw.indexOf('?');
+    if (i < 0) return const {};
+    try {
+      return Uri.splitQueryString(raw.substring(i + 1).split(RegExp(r'\s')).first);
+    } catch (_) {
+      return const {};
     }
-    if (b.isProjects) return _shareProjects(canEdit: canEdit, allowCopy: allowCopy);
-    b.shareCode ??= newShareCode();
+  }
+
+  /// Davet bağlantısı (dokununca uygulamada katılma ekranı açılır).
+  static const inviteBase = 'https://emolibor.github.io/shake-rack/katil/';
+
+  String inviteLink(Board b) {
+    final code = b.shareCode;
+    if (b.isProjects || code == null || code.length != 8) return '';
+    final owner = hasProfile ? profile.name : '';
+    return '$inviteBase?k=$code'
+        '&n=${Uri.encodeQueryComponent(b.name)}'
+        '${owner.isEmpty ? '' : '&o=${Uri.encodeQueryComponent(owner)}'}'
+        '${uid.isEmpty ? '' : '&u=$uid'}';
+  }
+
+  Future<void> _createShare(Board b,
+      {required String code, required bool canEdit, required bool allowCopy}) async {
+    b.shareCode = code;
+    b.shareV2 = true;
     b.role = ShareRole.owner;
     b.shareCanEdit = canEdit;
     b.allowCopy = allowCopy;
     b.shareEnded = false;
-    await _shareDoc(b.shareCode!).set({
+    b.people = {uid: ShareRole.owner.name};
+    await _shareDoc(code).set({
       ...b.sharePayload(),
+      'owner': uid,
+      'ownerName': profile.name,
       'permission': canEdit ? 'edit' : 'view',
       'allowCopy': allowCopy,
-      'owner': profile.id,
-      'ownerName': hasProfile ? profile.name : me.name,
-      'members': {profile.id: _meEntry(ShareRole.owner)},
+      'members': {uid: _meEntry(ShareRole.owner)},
+      'log': <dynamic>[],
       'updatedBy': deviceId,
       'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true)); // merge: katılanların üye kaydı silinmesin
-    b.people[profile.id] = ShareRole.owner.name;
+    });
     _listenShared(b);
+  }
+
+  /// Askılığı paylaş (ya da izinlerini güncelle). Kodu döner.
+  /// Katılmak isteyen herkes için yönetici onayı gerekir.
+  Future<String> shareBoard(Board b,
+      {required bool canEdit, required bool allowCopy}) async {
+    if (!firebaseReady || !signedIn) {
+      throw StateError('Paylaşım için internet gerekli.');
+    }
+    if (b.isProjects) {
+      throw StateError('Projeler yönetim panelinden kişi kişi yetkilendirilir.');
+    }
+    if (b.shareCode == null) {
+      await _createShare(b, code: newShareCode(), canEdit: canEdit, allowCopy: allowCopy);
+    } else {
+      // izin değişti: mevcut katılanların rolünü de güncelle
+      b.shareCanEdit = canEdit;
+      b.allowCopy = allowCopy;
+      final upd = <String, dynamic>{
+        'permission': canEdit ? 'edit' : 'view',
+        'allowCopy': allowCopy,
+      };
+      b.people.forEach((id, role) {
+        if (role == 'owner') return;
+        upd['members.$id.role'] = canEdit ? 'editor' : 'viewer';
+      });
+      await _shareDoc(b.shareCode!).update(upd);
+    }
     notifyListeners();
     await _saveLocal();
     return b.shareCode!;
   }
 
-  /// Paylaşımı kapat (sahip). Alıcılarda askılık yerel kopyaya dönüşür.
+  /// Paylaşımı kapat (sahip). Katılanlarda askılık yerel kopyaya dönüşür.
   Future<void> stopSharing(Board b) async {
-    if (b.isProjects) return _stopSharingProjects();
     final code = b.shareCode;
-    if (code == null) return;
+    if (code == null || b.isProjects) return;
     _unlistenShared(b);
     if (b.role == ShareRole.owner && firebaseReady) {
       try {
@@ -517,67 +834,125 @@ class RackStore extends ChangeNotifier {
     }
     b.shareCode = null;
     b.role = null;
+    b.people = {};
     notifyListeners();
     await _saveLocal();
   }
 
-  /// Kodla paylaşılan askılığın içeriğini getir (önizleme). Yoksa null.
-  /// Yapıştırılan bağlantıdan kodu çıkar ("…/katil/?k=K7P2QX9M&n=…" → "K7P2QX9M").
-  static String extractCode(String raw) {
-    final m = RegExp(r'[?&]k=([A-Za-z0-9\-]+)').firstMatch(raw);
-    return m != null ? m.group(1)! : raw;
-  }
-
-  Future<Map<String, dynamic>?> fetchShared(String rawCode) async {
-    rawCode = extractCode(rawCode.trim());
-    final code = normalizeCode(rawCode);
-    if (code.length == 8) return _fetchDoc('share_${code.toLowerCase()}', code);
-    // eski tip ekip kodu (ör. "eski-ekip-kodu")
-    final legacy = _rackId(rawCode);
-    if (legacy.length < 6) return null;
-    return _fetchDoc(legacy, legacy);
-  }
-
-  static String _rackId(String s) =>
-      s.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9\-_]'), '-');
-
-  Future<Map<String, dynamic>?> _fetchDoc(String docId, String code) async {
-    final snap =
-        await FirebaseFirestore.instance.collection('racks').doc(docId).get();
-    if (!snap.exists) return null;
-    if (snap.data()?['movedTo'] != null) return null; // eski kod kapatıldı
-    final d = {...snap.data()!, 'code': code, '_doc': docId};
-    if (isProjectsData(d)) {
-      d['name'] ??= d['projectsName'] ?? 'Projeler';
-      d['kind'] = 'projects';
+  /// Bağlantı ya da kodla katılma isteği gönder. Yönetici onaylayınca
+  /// askılık kendiliğinden eklenir.
+  Future<JoinRequest> requestJoin(String raw) async {
+    if (!firebaseReady || !signedIn) throw StateError('İnternet bağlantısı yok.');
+    if (!hasProfile) throw StateError('Önce adını gir.');
+    final params = linkParams(raw);
+    final code = normalizeCode(extractCode(raw.trim()));
+    if (code.length != 8) throw StateError('Bağlantı geçersiz.');
+    if (custom.any((b) => b.shareCode == code)) {
+      throw StateError('Bu askılık zaten sende.');
     }
-    return d;
+    if (params['u'] == uid) throw StateError('Bu senin kendi paylaşımın.');
+    final id = '${code}_$uid';
+    final ref = _db.collection('joinRequests').doc(id);
+    final data = {
+      'shareId': code,
+      'uid': uid,
+      'name': profile.name,
+      'emoji': profile.emoji,
+      'color': profile.color.value,
+      'boardName': params['n'] ?? '',
+      'ownerName': params['o'] ?? '',
+      'ownerUid': params['u'] ?? '',
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+    try {
+      await ref.delete(); // önceki (reddedilmiş) istek varsa
+    } catch (_) {}
+    await ref.set(data);
+    final r = JoinRequest.fromDoc(id, {...data, 'createdAt': null});
+    myJoins[code] = r;
+    notifyListeners();
+    return r;
   }
 
-  /// Paylaşım belgesi bir Projeler askılığı mı?
-  static bool isProjectsData(Map d) =>
-      d['kind'] == 'projects' || d.containsKey('projectTypes');
+  /// İsteği kaldır (beklemekten vazgeç / reddedileni kapat).
+  Future<void> dismissJoin(String code) async {
+    myJoins.remove(code);
+    notifyListeners();
+    try {
+      await _db.collection('joinRequests').doc('${code}_$uid').delete();
+    } catch (_) {}
+  }
 
-  /// Paylaşılan askılığa canlı bağlan (izne göre düzenleyici / izleyici).
-  Board joinShared(Map<String, dynamic> data) {
-    if (isProjectsData(data)) return joinProjects(data);
-    final code = data['code'] as String;
+  /// Benim katılma isteklerimi dinle; onaylanınca askılığa katıl.
+  void _listenMyJoins() {
+    if (!signedIn) return;
+    _myJoinsSub?.cancel();
+    _myJoinsSub = _db
+        .collection('joinRequests')
+        .where('uid', isEqualTo: uid)
+        .snapshots()
+        .listen((q) async {
+      final next = <String, JoinRequest>{};
+      for (final d in q.docs) {
+        final r = JoinRequest.fromDoc(d.id, d.data());
+        next[r.shareId] = r;
+      }
+      myJoins = next;
+      notifyListeners();
+      for (final r in next.values.where((r) => r.status == 'approved')) {
+        if (custom.any((b) => b.shareCode == r.shareId)) {
+          // katıldık; isteği temizle
+          try {
+            await _db.collection('joinRequests').doc(r.id).delete();
+          } catch (_) {}
+          continue;
+        }
+        await _completeJoin(r);
+      }
+    }, onError: (_) {});
+  }
+
+  /// Onaylanan isteği tamamla: üye listesine kendimi ekle, askılığı getir.
+  Future<void> _completeJoin(JoinRequest r) async {
+    final ref = _shareDoc(r.shareId);
+    Map<String, dynamic>? data;
+    // izne göre rolü kural belirler: önce düzenleyici dene, olmazsa izleyici
+    for (final role in [ShareRole.editor, ShareRole.viewer]) {
+      try {
+        await ref.update({'members.$uid': _meEntry(role)});
+        final s = await ref.get();
+        data = s.data();
+        break;
+      } catch (_) {}
+    }
+    if (data == null) return; // paylaşım kapatılmış olabilir
+    attachShared(data, r.shareId);
+    try {
+      await _db.collection('joinRequests').doc(r.id).delete();
+    } catch (_) {}
+    myJoins.remove(r.shareId);
+    notifyListeners();
+    await _saveLocal();
+  }
+
+  /// Üyesi olduğum paylaşım belgesinden askılığı ekle (onaydan sonra).
+  Board attachShared(Map<String, dynamic> data, String code) {
     final existing = custom.cast<Board?>()
         .firstWhere((x) => x!.shareCode == code, orElse: () => null);
     if (existing != null) return existing;
     final b = Board.fromShare(data)..store = this;
     b.shareCode = code;
-    b.shareCanEdit = data['permission'] != 'view';
+    b.shareV2 = true;
+    final mine = (data['members'] is Map) ? (data['members'] as Map)[uid] : null;
+    final role = mine is Map ? '${mine['role']}' : null;
+    b.shareCanEdit = role == 'editor' || (role == null && data['permission'] != 'view');
     b.role = b.shareCanEdit ? ShareRole.editor : ShareRole.viewer;
     b.allowCopy = data['allowCopy'] ?? false;
-    custom.add(b);
     _absorbMembers(b, data['members']);
-    b.people[profile.id] = b.role!.name;
-    if (firebaseReady) {
-      _shareDoc(code)
-          .set({'members': {profile.id: _meEntry(b.role!)}}, SetOptions(merge: true))
-          .catchError((_) {});
-    }
+    b.people[uid] = b.role!.name;
+    b.log = _parseLog(data['log']);
+    custom.add(b);
     _listenShared(b);
     notifyListeners();
     _saveLocal();
@@ -586,14 +961,6 @@ class RackStore extends ChangeNotifier {
 
   /// Paylaşılan askılığın bağımsız kopyasını kendi askılıklarına ekle.
   Board copyShared(Map<String, dynamic> data, {String? name}) {
-    if (isProjectsData(data)) {
-      data = {
-        ...data,
-        'name': data['projectsName'] ?? data['name'] ?? 'Projeler',
-        'template': data['projectTypes'] ?? kProjectTypes,
-        'kind': 'items',
-      };
-    }
     final b = Board.fromShare(data)..store = this;
     if (name != null) b.name = name;
     b.cards.removeWhere((c) => c.deleted);
@@ -614,47 +981,50 @@ class RackStore extends ChangeNotifier {
     _shareTimers[b.id] = Timer(const Duration(milliseconds: 400), () async {
       final code = b.shareCode;
       if (code == null) return;
+      final owner = b.role == ShareRole.owner;
       try {
         await _shareDoc(code).set({
-          ...b.sharePayload(),
-          if (b.role == ShareRole.owner) ...{
-            'permission': b.shareCanEdit ? 'edit' : 'view',
-            'allowCopy': b.allowCopy,
-          },
+          if (owner) ...b.sharePayload() else 'cards': b.cards.map((e) => e.toJson()).toList(),
           'updatedBy': deviceId,
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
-      } catch (_) {/* çevrimdışı: Firestore kuyruğa alır */}
+      } catch (_) {/* çevrimdışı ya da yetki yok */}
     });
   }
 
   void _listenShared(Board b) {
-    if (!firebaseReady || b.shareCode == null) return;
+    if (!firebaseReady || !signedIn || b.shareCode == null) return;
     _unlistenShared(b);
+    void ended() async {
+      if (b.role == ShareRole.owner) return;
+      // paylaşım kapandı ya da çıkarıldım → bu telefonda bağımsız kopya
+      _unlistenShared(b);
+      b.shareCode = null;
+      b.role = null;
+      b.people = {};
+      b.shareEnded = true;
+      notifyListeners();
+      await _saveLocal();
+    }
+
     _shareSubs[b.id] = _shareDoc(b.shareCode!).snapshots().listen((snap) async {
       if (!snap.exists) {
-        if (b.role != ShareRole.owner) {
-          // paylaşan kapattı → artık bu telefonda bağımsız kopya
-          _unlistenShared(b);
-          b.shareCode = null;
-          b.role = null;
-          b.shareEnded = true;
-          notifyListeners();
-          await _saveLocal();
-        }
+        if (!snap.metadata.isFromCache) ended();
         return;
       }
       final pending = _shareTimers[b.id]?.isActive ?? false;
       applySharedSnapshot(b, snap.data()!, pending: pending);
       await _saveLocal();
-    });
+    }, onError: (_) => ended());
   }
 
   /// Paylaşım belgesindeki son durumu askılığa uygula: içerik, izinler, üyeler.
   void applySharedSnapshot(Board b, Map<String, dynamic> d, {bool pending = false}) {
     if (d['updatedBy'] != deviceId && !pending) b.applyShared(d);
     if (b.role != ShareRole.owner) {
-      b.shareCanEdit = d['permission'] != 'view';
+      final mine = (d['members'] is Map) ? (d['members'] as Map)[uid] : null;
+      final role = mine is Map ? '${mine['role']}' : null;
+      b.shareCanEdit = role == 'editor' || (role == null && d['permission'] != 'view');
       b.role = b.shareCanEdit ? ShareRole.editor : ShareRole.viewer;
       b.allowCopy = d['allowCopy'] ?? false;
     }
@@ -666,7 +1036,7 @@ class RackStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Belgedeki üyeleri askılığa yaz; kendin dışındakileri arkadaş listesine ekle.
+  /// Belgedeki kişileri askılığa yaz; kendin dışındakileri arkadaş listesine ekle.
   void _absorbMembers(Board b, dynamic raw) {
     if (raw is! Map) return;
     final people = <String, String>{};
@@ -691,21 +1061,21 @@ class RackStore extends ChangeNotifier {
         'role': role.name,
       };
 
-  /// Alıcı askılıktan ayrılınca üye listesinden çıkar.
+  /// Katılan askılıktan ayrılınca üye listesinden çık.
   Future<void> _leaveMembers(Board b) async {
     if (!firebaseReady || b.shareCode == null) return;
     try {
-      await _shareDoc(b.shareCode!).update({'members.${profile.id}': FieldValue.delete()});
+      await _shareDoc(b.shareCode!).update({'members.$uid': FieldValue.delete()});
     } catch (_) {}
   }
 
   // ---------- Projeler askılığı (isteğe bağlı) ----------
 
-  /// Projeler askılığını bu telefondan kaldır. Ekip koduna bağlı değilse
-  /// içeriği de temizlenir; bağlıysa ekibin verisine dokunulmaz.
+  /// Projeler'i bu telefondan kaldır. Bulutla eşitleniyorsa (yönetici ya da
+  /// yetkili) bulut verisine dokunulmaz; değilse içerik de temizlenir.
   Future<void> hideProjects() async {
     projectsHidden = true;
-    if (rackCode.isEmpty) {
+    if (!projectsLinked) {
       projects.cards = [];
       projects.template = List.of(kProjectTypes);
       projects.name = 'Projeler';
@@ -715,7 +1085,7 @@ class RackStore extends ChangeNotifier {
     await _saveLocal();
   }
 
-  /// Projeler askılığını geri ekle.
+  /// Projeler'i geri ekle.
   Board showProjects() {
     projectsHidden = false;
     notifyListeners();
@@ -723,285 +1093,20 @@ class RackStore extends ChangeNotifier {
     return projects;
   }
 
-  // ---------- Projeler'i paylaşma (diğer askılıklar gibi) ----------
-  // Yeni paylaşımlar racks/share_<kod> belgesinde durur. Eski tip ekip kodu
-  // (ör. "eski-ekip-kodu") aynı şekilde çalışmaya devam eder.
-
-  /// Projeler askılığının paylaşım bilgilerini (kod, rol, izin) güncel tut.
-  void _syncProjectsShareState() {
-    if (rackCode.isEmpty) {
-      projects.shareCode = null;
-      projects.role = null;
-      projects.people = {};
-      return;
-    }
-    projects.shareCode = rackCode.startsWith('share_')
-        ? rackCode.substring(6).toUpperCase()
-        : rackCode;
-    projects.shareCanEdit = projectsPermission != 'view';
-    projects.allowCopy = projectsAllowCopy;
-    projects.role = projectsOwner == null
-        ? null // sahipsiz eski kod: herkes yönetebilir
-        : projectsOwner == profile.id
-            ? ShareRole.owner
-            : (projects.shareCanEdit ? ShareRole.editor : ShareRole.viewer);
-  }
-
-  Future<String> _shareProjects(
-      {required bool canEdit, required bool allowCopy}) async {
-    projectsPermission = canEdit ? 'edit' : 'view';
-    projectsAllowCopy = allowCopy;
-    if (rackCode.isEmpty) {
-      final code = newShareCode();
-      rackCode = 'share_${code.toLowerCase()}';
-      projectsOwner = profile.id;
-      projectsLog = [];
-      await _doc.set({
-        ..._toCloud(),
-        'kind': 'projects',
-        'owner': profile.id,
-        'ownerName': hasProfile ? profile.name : me.name,
-        'permission': projectsPermission,
-        'allowCopy': allowCopy,
-        'people': {profile.id: _meEntry(ShareRole.owner)},
-      });
-    } else {
-      // zaten paylaşılıyor (eski kod dahil): izinleri güncelle, sahipsizse sahiplen
-      projectsOwner ??= profile.id;
-      await _doc.set({
-        'kind': 'projects',
-        'permission': projectsPermission,
-        'allowCopy': allowCopy,
-        'owner': projectsOwner,
-        'people': {profile.id: _meEntry(ShareRole.owner)},
-      }, SetOptions(merge: true));
-    }
-    projectsEverUsed = true;
-    _syncProjectsShareState();
-    _listen();
-    notifyListeners();
-    await _saveLocal();
-    return projects.shareCode!;
-  }
-
-  /// Davet bağlantısı (dokununca uygulamada katılma ekranı açılır).
-  static const inviteBase = 'https://emolibor.github.io/shake-rack/katil/';
-
-  /// Projeler eski tip (tahmin edilebilir) kodla mı paylaşılıyor?
-  bool get projectsOnLegacyCode =>
-      rackCode.isNotEmpty && !rackCode.startsWith('share_');
-
-  /// Paylaşılan askılığın davet bağlantısı; eski kodda boş.
-  String inviteLink(Board b) {
-    final code = b.shareCode;
-    if (code == null || code.length != 8) return '';
-    final owner = hasProfile ? profile.name : '';
-    return '$inviteBase?k=$code'
-        '&n=${Uri.encodeQueryComponent(b.name)}'
-        '${owner.isEmpty ? '' : '&o=${Uri.encodeQueryComponent(owner)}'}';
-  }
-
-  /// Eski ekip kodundan (ör. "eski-ekip-kodu") rastgele bağlantıya geç.
-  /// Veri yeni belgeye kopyalanır, eski belge sadece yönlendirme olarak kalır:
-  /// şu an bağlı olanlar otomatik taşınır, eski kodu yeni deneyen giremez.
-  Future<String> migrateProjectsToLink() async {
-    if (!projectsOnLegacyCode) return projects.shareCode ?? '';
-    if (!firebaseReady) throw StateError('İnternet / Firebase bağlantısı yok.');
-    final old = _doc;
-    final snap = await old.get();
-    final data = snap.data() ?? {};
-    final code = newShareCode();
-    final newId = 'share_${code.toLowerCase()}';
-    projectsOwner ??= profile.id;
-    await FirebaseFirestore.instance.collection('racks').doc(newId).set({
-      ...data,
-      ..._toCloud(),
-      'kind': 'projects',
-      'owner': projectsOwner,
-      'ownerName': hasProfile ? profile.name : me.name,
-      'permission': projectsPermission,
-      'allowCopy': projectsAllowCopy,
-      'people': {
-        ...(data['people'] is Map ? Map<String, dynamic>.from(data['people']) : {}),
-        profile.id: _meEntry(ShareRole.owner),
-      },
-    });
-    await old.set({'movedTo': newId, 'updatedAt': FieldValue.serverTimestamp()});
-    _sub?.cancel();
-    rackCode = newId;
-    _syncProjectsShareState();
-    _listen();
-    notifyListeners();
-    await _saveLocal();
-    return code;
-  }
-
-  /// Sahip Projeler paylaşımını kapatır: kartlar sende kalır, diğerlerinde
-  /// kendi kopyası olarak kalır.
-  Future<void> _stopSharingProjects() async {
-    if (rackCode.isEmpty) return;
-    final doc = _doc;
-    _sub?.cancel();
-    _sub = null;
-    try {
-      await doc.delete();
-    } catch (_) {}
-    rackCode = '';
-    projectsOwner = null;
-    projectsLog = [];
-    _syncProjectsShareState();
-    syncStatus = 'Yerel';
-    notifyListeners();
-    await _saveLocal();
-  }
-
-  /// Paylaşım sunucuda kapatıldı → bu telefonda yerel olarak devam et.
-  Future<void> _detachProjects() async {
-    _sub?.cancel();
-    _sub = null;
-    rackCode = '';
-    projectsOwner = null;
-    _syncProjectsShareState();
-    syncStatus = 'Yerel';
-    notifyListeners();
-    await _saveLocal();
-  }
-
-  /// Paylaşılan Projeler askılığına katıl. Bu telefondaki Projeler'in yerini alır.
-  Board joinProjects(Map<String, dynamic> d) {
-    _sub?.cancel();
-    rackCode = '${d['_doc'] ?? d['code']}';
-    projectsOwner = d['owner'] as String?;
-    projectsPermission = d['permission'] == 'view' ? 'view' : 'edit';
-    projectsAllowCopy = d['allowCopy'] ?? true;
-    projectsHidden = false;
-    projectsEverUsed = true;
-    _applyCloud(d);
-    projectsLog = _parseLog(d['log']);
-    _absorbMembers(projects, d['people']);
-    _syncProjectsShareState();
-    if (memberById(currentMemberId) == null) currentMemberId = members.first.id;
-    final myRole = projects.role ?? ShareRole.editor;
-    projects.people[profile.id] = myRole.name;
-    if (firebaseReady) {
-      _doc.set({'people': {profile.id: _meEntry(myRole)}}, SetOptions(merge: true))
-          .catchError((_) {});
-    }
-    _listen();
-    notifyListeners();
-    _saveLocal();
-    return projects;
-  }
-
-  /// Katıldığın Projeler'den ayrıl: bu telefondan kaldırılır, paylaşana dokunulmaz.
-  Future<void> leaveProjects() async {
-    if (firebaseReady && rackCode.isNotEmpty) {
-      try {
-        await _doc.update({'people.${profile.id}': FieldValue.delete()});
-      } catch (_) {}
-    }
-    _sub?.cancel();
-    _sub = null;
-    rackCode = '';
-    projectsOwner = null;
-    projectsLog = [];
-    projects.cards = [];
-    projects.template = List.of(kProjectTypes);
-    projects.name = 'Projeler';
-    _syncProjectsShareState();
-    syncStatus = 'Yerel';
-    projectsHidden = true;
-    boardOrder.remove(projects.id);
-    notifyListeners();
-    await _saveLocal();
-  }
-
   // ---------- profil ve arkadaşlar ----------
-
-  DocumentReference<Map<String, dynamic>> _profileDoc(String id) =>
-      FirebaseFirestore.instance.collection('racks').doc('user_$id');
-  StreamSubscription? _profileSub;
-  final Set<String> _joiningInvites = {};
 
   Future<void> updateProfile({String? name, Color? color, String? emoji}) async {
     profile = profile.copyWith(name: name?.trim(), color: color, emoji: emoji);
     notifyListeners();
     await _saveLocal();
-    if (!firebaseReady || !hasProfile) return;
+    if (!firebaseReady || !signedIn || !hasProfile) return;
+    await _publishProfile();
     try {
-      await _profileDoc(profile.id).set({
-        'name': profile.name,
-        'color': profile.color.value,
-        'emoji': profile.emoji,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      // paylaşılan askılıklardaki kendi kaydını da güncelle
       for (final b in custom.where((b) => b.isShared)) {
-        final role = b.role ?? ShareRole.editor;
         await _shareDoc(b.shareCode!)
-            .set({'members': {profile.id: _meEntry(role)}}, SetOptions(merge: true));
-      }
-      if (rackCode.isNotEmpty) {
-        await _doc.set({
-          'people': {profile.id: _meEntry(projects.role ?? ShareRole.editor)}
-        }, SetOptions(merge: true));
+            .update({'members.$uid': _meEntry(b.role ?? ShareRole.editor)});
       }
     } catch (_) {}
-  }
-
-  /// Kendi profil belgemi dinle: arkadaşların gönderdiği ortak askılık
-  /// davetleri buraya düşer ve otomatik katılınır.
-  void _listenProfile() {
-    if (!firebaseReady || profile.id.isEmpty) return;
-    _profileSub?.cancel();
-    _profileSub = _profileDoc(profile.id).snapshots().listen((snap) async {
-      final inbox = (snap.data()?['inbox'] as List?) ?? const [];
-      for (final inv in inbox) {
-        if (inv is! Map) continue;
-        final code = '${inv['code'] ?? ''}';
-        if (code.isEmpty || _joiningInvites.contains(code)) continue;
-        final docId = '${inv['doc'] ?? 'share_${code.toLowerCase()}'}';
-        _joiningInvites.add(code);
-        try {
-          final already =
-              custom.any((b) => b.shareCode == code) || rackCode == docId;
-          if (!already) {
-            final data = await _fetchDoc(docId, code);
-            if (data != null) {
-              if (!isProjectsData(data)) {
-                joinShared(data);
-              } else if (rackCode.isEmpty && projects.live.isEmpty) {
-                // kendi proje verisi olmayan telefonda Projeler'e otomatik katıl
-                joinProjects(data);
-              }
-            }
-          }
-          await _profileDoc(profile.id)
-              .update({'inbox': FieldValue.arrayRemove([inv])});
-        } catch (_) {
-        } finally {
-          _joiningInvites.remove(code);
-        }
-      }
-    }, onError: (_) {});
-  }
-
-  /// Arkadaşla ortak askılık: gerekirse paylaşır, arkadaşın gelen kutusuna
-  /// davet bırakır. Arkadaşın uygulaması açıkken askılık onda kendiliğinden belirir.
-  Future<void> inviteFriend(Board b, Member friend) async {
-    if (!firebaseReady) throw StateError('İnternet / Firebase bağlantısı yok.');
-    if (!b.isShared) await shareBoard(b, canEdit: true, allowCopy: true);
-    await _profileDoc(friend.id).set({
-      'inbox': FieldValue.arrayUnion([
-        {
-          'code': b.shareCode,
-          'doc': b.isProjects ? rackCode : 'share_${b.shareCode!.toLowerCase()}',
-          'from': profile.id,
-          'fromName': profile.name,
-          'board': b.name,
-        }
-      ]),
-    }, SetOptions(merge: true));
   }
 
   /// Bu arkadaşla ortak olan askılıklar.
@@ -1079,7 +1184,7 @@ class RackStore extends ChangeNotifier {
 
   /// Ortak askılıkta yapılan işlemi geçmişe yaz (yalnız/kodsuz askılıklarda yazılmaz).
   void logActivity(Board b, String action, CompanyCard card, String item) {
-    final shared = b.isProjects ? rackCode.isNotEmpty : b.isShared;
+    final shared = b.isProjects ? projectsLinked : b.isShared;
     if (!shared) return;
     final a = Activity(
       id: _uuid.v4(),
@@ -1098,7 +1203,7 @@ class RackStore extends ChangeNotifier {
     final list = b.isProjects ? projectsLog : b.log;
     list.add(a);
     if (list.length > 400) list.removeRange(0, list.length - 400);
-    if (!firebaseReady) return;
+    if (!firebaseReady || !signedIn) return;
     final doc = b.isProjects ? _doc : _shareDoc(b.shareCode!);
     // arrayUnion: aynı anda iki kişi işlem yapsa da kayıt kaybolmaz
     doc.update({
@@ -1127,37 +1232,19 @@ class RackStore extends ChangeNotifier {
     return (board: b, card: c);
   }
 
-  /// Sahibi belli olmayan proje kodunu sahiplen (ilk basan sahip olur).
-  Future<bool> claimProjects() async {
-    if (!syncing || !firebaseReady) return false;
-    var ok = false;
-    await FirebaseFirestore.instance.runTransaction((tx) async {
-      final s = await tx.get(_doc);
-      if (s.data()?['owner'] == null) {
-        tx.update(_doc, {'owner': profile.id, 'ownerName': profile.name});
-        ok = true;
-      }
-    });
-    if (ok) {
-      projectsOwner = profile.id;
-      _syncProjectsShareState();
-      notifyListeners();
-      await _saveLocal();
-    }
-    return ok;
-  }
-
   /// Sahibin adı (arkadaş listesinden ya da proje ekibinden).
   String get projectsOwnerName {
     final o = projectsOwner;
-    if (o == null) return '';
+    if (o == null) return 'yönetici';
     if (o == profile.id) return hasProfile ? profile.name : 'Sen';
-    return friends[o]?.name ?? 'Askılık sahibi';
+    return friends[o]?.name ?? 'yönetici';
   }
 
   @override
   void dispose() {
-    _profileSub?.cancel();
+    for (final s in [_meSub, _usersSub, _pendingSub, _myJoinsSub]) {
+      s?.cancel();
+    }
     for (final s in _shareSubs.values) {
       s.cancel();
     }

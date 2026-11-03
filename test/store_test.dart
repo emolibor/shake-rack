@@ -8,6 +8,9 @@ import 'package:shake_rack/services/board.dart';
 import 'package:shake_rack/models/models.dart';
 import 'package:shake_rack/services/store.dart';
 
+/// Yönetici onayından sonra katılımı simüle eder (Firebase olmadan).
+Board join(RackStore s, Map<String, dynamic> d) => s.attachShared(d, d['code'] as String);
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -249,14 +252,14 @@ void main() {
       reels.addCard('Video 1', reels.template);
 
       final guest = RackStore();
-      final b = guest.joinShared(sharedDoc(owner, reels, permission: 'view'));
+      final b = join(guest, sharedDoc(owner, reels, permission: 'view'));
       expect(b.isShared, isTrue);
       expect(b.role, ShareRole.viewer);
       expect(b.canEdit, isFalse);
       expect(b.isPrivate, isFalse);
       expect(b.cards.single.name, 'Video 1');
       // aynı koda tekrar katılınca yeni askılık açılmaz
-      expect(guest.joinShared(sharedDoc(owner, reels, permission: 'view')), same(b));
+      expect(join(guest, sharedDoc(owner, reels, permission: 'view')), same(b));
       expect(guest.custom.length, 1);
     });
 
@@ -265,7 +268,7 @@ void main() {
       final notes = owner.addBoard('Notlar', const [], kind: BoardKind.notes);
       notes.addCard('Tabela', const []);
       final guest = RackStore();
-      final b = guest.joinShared(sharedDoc(owner, notes));
+      final b = join(guest, sharedDoc(owner, notes));
       expect(b.role, ShareRole.editor);
       expect(b.canEdit, isTrue);
       expect(b.isNotes, isTrue);
@@ -293,7 +296,7 @@ void main() {
       final owner = RackStore();
       final reels = Board.custom('GİZLİ Reels', ['Instagram']);
       final guest = RackStore();
-      guest.joinShared(sharedDoc(owner, reels, permission: 'view', allowCopy: false));
+      join(guest, sharedDoc(owner, reels, permission: 'view', allowCopy: false));
       expect(jsonEncode(guest.sharedJson()), isNot(contains('GİZLİ')));
       await Future<void>.delayed(const Duration(milliseconds: 50));
       final again = RackStore();
@@ -346,9 +349,10 @@ void main() {
 
     test('paylaşılan askılıktaki kişiler arkadaş olur, ortak askılık görünür', () {
       final guest = RackStore()
+        ..uid = 'p-guest'
         ..profile = const Member(id: 'p-guest', name: 'Ben', color: Color(0xFF2E7DE0));
       final reels = Board.custom('Reels', ['Instagram']);
-      final b = guest.joinShared({
+      final b = join(guest, {
         ...reels.sharePayload(),
         'permission': 'edit',
         'allowCopy': true,
@@ -379,11 +383,12 @@ void main() {
 
     test('paylaşılan askılıkta tik profil kimliğiyle atılır', () {
       final guest = RackStore()
+        ..uid = 'p-guest'
         ..profile = const Member(id: 'p-guest', name: 'Ben', color: Color(0xFF9B4DE0));
       final reels = Board.custom('Reels', ['Instagram']);
       reels.cards.add(CompanyCard(
           id: 'c1', name: 'Video', items: [ProjectItem(type: 'Instagram')]));
-      final b = guest.joinShared({
+      final b = join(guest, {
         ...reels.sharePayload(),
         'permission': 'edit',
         'code': 'ABCD2345',
@@ -413,6 +418,7 @@ void main() {
 
     test('ortak askılıkta silinen kart gizlenir ve sahip geri yükler', () {
       final s = RackStore()
+        ..uid = 'p-me'
         ..profile = const Member(id: 'p-me', name: 'Emirhan', color: Color(0xFF2E7DE0));
       final b = ownedShared(s);
       final c = b.addCard('Video 1', b.template);
@@ -432,9 +438,10 @@ void main() {
 
     test('düzenleyici askılık ayarlarını değiştiremez, silineni geri yükleyemez', () {
       final guest = RackStore()
+        ..uid = 'p-guest'
         ..profile = const Member(id: 'p-guest', name: 'Mert', color: Color(0xFF14A3A3));
       final src = Board.custom('Reels', ['Instagram']);
-      final b = guest.joinShared({
+      final b = join(guest, {
         ...src.sharePayload(),
         'permission': 'edit',
         'code': 'ABCD2345',
@@ -457,6 +464,7 @@ void main() {
 
     test('işlem metinleri ve diğer kullanıcı rozeti', () {
       final s = RackStore()
+        ..uid = 'p-me'
         ..profile = const Member(id: 'p-me', name: 'Emirhan', color: Color(0xFF2E7DE0));
       final b = ownedShared(s);
       final c = b.addCard('Örnek Tekstil', ['Elektrik Projesi']);
@@ -487,15 +495,10 @@ void main() {
     });
   });
 
-  group('Yeni kurulum ve Projeler paylaşımı', () {
-    Map<String, dynamic> projectsDoc({String perm = 'edit', String owner = 'p-owner'}) => {
-          'kind': 'projects',
-          'code': 'K7P2QX9M',
-          '_doc': 'share_k7p2qx9m',
-          'owner': owner,
+  group('Yeni kurulum ve yönetici yetkili Projeler', () {
+    Map<String, dynamic> projectsDoc() => {
+          'owner': 'p-admin',
           'ownerName': 'Emirhan',
-          'permission': perm,
-          'allowCopy': true,
           'projectsName': 'Ekip Projeler',
           'projectTypes': ['Mimari Proje', 'Elektrik Projesi'],
           'members': [
@@ -512,11 +515,17 @@ void main() {
             },
           ],
           'people': {
-            'p-owner': {'name': 'Emirhan', 'color': 0xFF8B6A3E, 'role': 'owner'},
+            'p-admin': {'name': 'Emirhan', 'color': 0xFF8B6A3E, 'role': 'owner'},
+            'p-guest': {'name': 'Mert', 'color': 0xFF14A3A3, 'role': 'editor'},
           },
+          'updatedBy': 'yonetici-cihazi',
         };
 
-    test('yeni kurulumda Projeler yok, Mesaj/ekip seçeneği yok', () async {
+    RackStore guest() => RackStore()
+      ..uid = 'p-guest'
+      ..profile = const Member(id: 'p-guest', name: 'Mert', color: Color(0xFF14A3A3));
+
+    test('yeni kurulumda Projeler yok', () async {
       final s = RackStore();
       await s.load();
       expect(s.projectsHidden, isTrue);
@@ -525,72 +534,55 @@ void main() {
     });
 
     test('eski kullanıcıda Projeler olduğu gibi kalır', () async {
-      SharedPreferences.setMockInitialValues({'cards_v1': '[]', 'rack_code_v1': 'eski-ekip-kodu'});
+      SharedPreferences.setMockInitialValues({'cards_v1': '[]'});
       final s = RackStore();
       await s.load();
       expect(s.projectsHidden, isFalse);
       expect(s.projectsEverUsed, isTrue);
-      // eski kod: kod olarak görünür, sahipsizken herkes yönetebilir
-      expect(s.projects.isShared, isTrue);
-      expect(s.projects.shareCodePretty, 'eski-ekip-kodu');
-      expect(s.projects.role, isNull);
+      expect(s.canManageProjects, isTrue); // yalnız kullanımda kendisi yönetir
     });
 
-    test('paylaşım belgesi Projeler olarak tanınır (eski kod dahil)', () {
-      expect(RackStore.isProjectsData(projectsDoc()), isTrue);
-      expect(RackStore.isProjectsData({'projectTypes': [], 'cards': []}), isTrue);
-      expect(RackStore.isProjectsData({'kind': 'notes'}), isFalse);
-    });
-
-    test('kodla Projeler\'e katılma: düzenleyici', () async {
-      final s = RackStore()
-        ..profile = const Member(id: 'p-guest', name: 'Mert', color: Color(0xFF14A3A3));
+    test('yönetici düzenleme yetkisi verince Projeler belirir', () async {
+      final s = guest();
       await s.hideProjects(); // yeni kullanıcı gibi
-      final b = s.joinShared(projectsDoc()); // dispatch → joinProjects
-      expect(b, same(s.projects));
+      s.applyProjectsAccess('edit');
+      s.applyProjectsSnapshot(projectsDoc());
       expect(s.projectsHidden, isFalse);
-      expect(s.rackCode, 'share_k7p2qx9m');
+      expect(s.projectsLinked, isTrue);
       expect(s.projects.name, 'Ekip Projeler');
       expect(s.projects.live.single.name, 'Örnek Tekstil');
       expect(s.projects.role, ShareRole.editor);
       expect(s.projects.canEdit, isTrue);
-      expect(s.projects.canManage, isFalse); // sahip değil
-      expect(s.friends['p-owner']!.name, 'Emirhan');
-      expect(s.projects.people['p-guest'], 'editor');
-      // sahip olmayan proje türlerini / ekibi değiştiremez
+      expect(s.projects.canManage, isFalse); // ayarlar sadece yöneticide
+      expect(s.friends['p-admin']!.name, 'Emirhan');
+      // yönetici olmayan ayar değiştiremez
       s.updateBoard(s.projects, name: 'Benim', template: ['X']);
       expect(s.projects.name, 'Ekip Projeler');
       expect(s.addMember(), isNull);
     });
 
-    test('sadece inceleme izniyle Projeler kilitli', () async {
-      final s = RackStore()
-        ..profile = const Member(id: 'p-guest', name: 'Mert', color: Color(0xFF14A3A3));
-      s.joinProjects(projectsDoc(perm: 'view'));
+    test('görüntüleme yetkisiyle Projeler kilitli', () {
+      final s = guest();
+      s.applyProjectsAccess('view');
+      s.applyProjectsSnapshot(projectsDoc());
       expect(s.projects.role, ShareRole.viewer);
       expect(s.projects.canEdit, isFalse);
     });
 
-    test('ayrılınca bu telefondan temizlenir', () async {
-      final s = RackStore()
-        ..profile = const Member(id: 'p-guest', name: 'Mert', color: Color(0xFF14A3A3));
-      s.joinProjects(projectsDoc());
-      await s.deleteBoard(s.projects); // alıcı → ayrıl
-      expect(s.rackCode, isEmpty);
+    test('yetki kaldırılınca Projeler bu telefondan kalkar', () {
+      final s = guest();
+      s.applyProjectsAccess('edit');
+      s.applyProjectsSnapshot(projectsDoc());
+      s.applyProjectsAccess('none');
       expect(s.projectsHidden, isTrue);
       expect(s.projects.cards, isEmpty);
       expect(s.projects.isShared, isFalse);
     });
 
-    test('Projeler kopyası bağımsız maddeli askılık olur', () {
-      final s = RackStore();
-      final c = s.copyShared(projectsDoc());
-      expect(c.isProjects, isFalse);
-      expect(c.isNotes, isFalse);
-      expect(c.name, 'Ekip Projeler');
-      expect(c.template, ['Mimari Proje', 'Elektrik Projesi']);
-      expect(c.cards.single.items.first.done, isTrue);
-      expect(s.projects.cards, isEmpty); // kendi Projeler'ine dokunulmaz
+    test('Projeler davet bağlantısıyla paylaşılmaz (panelden yetki verilir)', () {
+      final s = guest();
+      s.applyProjectsAccess('edit');
+      expect(s.inviteLink(s.projects), isEmpty);
     });
   });
 
@@ -610,32 +602,9 @@ void main() {
     expect(again.unseenCompleted, 0); // bakıldığı kayıtlı
   });
 
-  test('Projeler davet bağlantısı: rastgele kod, ad ve paylaşan bilgisi', () async {
-    final s = RackStore()
-      ..profile = const Member(id: 'p-me', name: 'Emirhan', color: Color(0xFF2E7DE0));
-    // eski tip kod: bağlantı yok, geçiş önerilir
-    SharedPreferences.setMockInitialValues({'cards_v1': '[]', 'rack_code_v1': 'eski-ekip-kodu'});
-    final legacy = RackStore();
-    await legacy.load();
-    expect(legacy.projectsOnLegacyCode, isTrue);
-    expect(legacy.inviteLink(legacy.projects), isEmpty);
-
-    // yeni tip: share_<kod>
-    s.joinProjects({
-      'kind': 'projects', '_doc': 'share_k7p2qx9m', 'code': 'K7P2QX9M',
-      'owner': 'p-me', 'projectsName': 'Ekip Projeler', 'cards': [],
-    });
-    expect(s.projectsOnLegacyCode, isFalse);
-    final link = s.inviteLink(s.projects);
-    expect(link, startsWith('https://emolibor.github.io/shake-rack/katil/?k=K7P2QX9M'));
-    final u = Uri.parse(link);
-    expect(u.queryParameters['k'], 'K7P2QX9M');
-    expect(u.queryParameters['n'], 'Ekip Projeler');
-    expect(u.queryParameters['o'], 'Emirhan');
-  });
-
   test('her paylaşım bağlantıyla: özel askılık bağlantısı ve yapıştırılan bağlantı', () {
     final s = RackStore()
+      ..uid = 'p-me'
       ..profile = const Member(id: 'p-me', name: 'Emirhan', color: Color(0xFF2E7DE0));
     final notes = s.addBoard('Alışveriş', const [], kind: BoardKind.notes);
     notes.shareCode = 'ABCD2345';
@@ -644,6 +613,10 @@ void main() {
     expect(Uri.parse(link).queryParameters['k'], 'ABCD2345');
     expect(Uri.parse(link).queryParameters['n'], 'Alışveriş');
     expect(RackStore.extractCode(link), 'ABCD2345');
+    final params = RackStore.linkParams('Katılmak için dokun:\n$link');
+    expect(params['n'], 'Alışveriş');
+    expect(params['o'], 'Emirhan');
+    expect(params['u'], 'p-me'); // kendi bağlantısına istek atamasın diye
     expect(RackStore.extractCode('Katılmak için dokun:\n$link'), 'ABCD2345');
     expect(RackStore.extractCode('abcd-2345'), 'abcd-2345'); // düz kod olduğu gibi
     expect(RackStore.normalizeCode(RackStore.extractCode('abcd-2345')), 'ABCD2345');

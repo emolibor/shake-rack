@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../screens/board_edit_screen.dart';
+import '../screens/share_sheets.dart';
 import '../services/board.dart';
 import '../services/store.dart';
 
@@ -251,18 +252,8 @@ Future<void> showFriendSheet(BuildContext context, RackStore store, Member frien
                     if (!context.mounted) return;
                     final b = await BoardEditScreen.create(context, store);
                     if (b == null || b.isProjects) return;
-                    try {
-                      await store.inviteFriend(b, f);
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: Text('"${b.name}" ${f.name} ile paylaşıldı 🤝')));
-                      }
-                    } catch (e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context)
-                            .showSnackBar(SnackBar(content: Text('Gönderilemedi: $e')));
-                      }
-                    }
+                    // paylaş penceresi: bağlantıyı arkadaşına gönder (katılımı yönetici onaylar)
+                    if (context.mounted) await showShareSheet(context, store, b);
                   },
                   icon: const Icon(Icons.add),
                   label: const Text('Yeni ortak askılık'),
