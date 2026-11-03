@@ -1,10 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Askılık kodu paylaşılan bir sır gibi çalışır: kodu bilen okur/yazar.
-    // Kod en az 6 karakter olsun ki tahmin edilmesin.
     match /racks/{rackId} {
-      allow read, write: if rackId.size() >= 6;
+      // Anahtarı (belge kimliğini) bilen tek belgeyi okur/yazar.
+      allow get, create, update, delete: if rackId.size() >= 6;
+      // Listeleme kapalı: kimse tüm askılıkları dökemez.
+      allow list: if false;
     }
   }
 }
