@@ -79,8 +79,22 @@ perms = [
 for p in perms:
     if p not in m:
         m = m.replace("<application", f'<uses-permission android:name="{p}"/>\n    <application', 1)
+# Davet bağlantısı: shakerack://join?k=KOD uygulamayı açar
+if 'android:scheme="shakerack"' not in m:
+    link = '''            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="shakerack" android:host="join"/>
+            </intent-filter>
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
+'''
+    i = m.find("</activity>")
+    if i < 0:
+        fail("MainActivity bulunamadı (davet bağlantısı eklenemedi)")
+    m = m[:i] + link + "        " + m[i:]
 mf.write_text(m)
-print("✓ AndroidManifest: ad + izinler")
+print("✓ AndroidManifest: ad + izinler + davet bağlantısı")
 
 # ---------- iOS görünen ad ----------
 plist = pathlib.Path("ios/Runner/Info.plist")

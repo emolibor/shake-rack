@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Shake Rack · Askılığa katıl</title>
+<meta property="og:title" content="Shake Rack · Askılığa katıl">
+<meta property="og:description" content="Seninle bir askılık paylaşıldı. Dokun, uygulamada aç.">
+<style>
+  :root { --brown:#8B6A3E; --dark:#6B4F2A; --paper:#FFF8E7; --wall:#EFE6D6; --ink:#2B2B2B; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; background:var(--wall); color:var(--ink);
+         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         display:flex; align-items:center; justify-content:center; padding:16px; }
+  .card { width:100%; max-width:420px; background:var(--paper); border-radius:20px;
+          box-shadow:0 8px 30px rgba(0,0,0,.12); overflow:hidden; text-align:center; }
+  .top { background:linear-gradient(135deg,var(--brown),var(--dark)); padding:28px 20px 22px; color:#fff; }
+  .top svg { width:64px; height:64px; }
+  .brand { font-size:11px; letter-spacing:3px; opacity:.7; font-weight:700; margin-top:8px; }
+  h1 { font-size:22px; margin:6px 0 0; line-height:1.25; }
+  .body { padding:22px 22px 26px; }
+  p { color:#5a5a5a; line-height:1.45; margin:0 0 18px; }
+  .btn { display:block; width:100%; padding:15px; border-radius:14px; border:0;
+         background:var(--brown); color:#fff; font-size:17px; font-weight:700;
+         text-decoration:none; margin-bottom:10px; }
+  .btn.alt { background:transparent; color:var(--dark); border:1.5px solid var(--brown); font-weight:600; font-size:15px; }
+  .code { margin-top:16px; font-size:13px; color:#777; }
+  .code b { font-family: ui-monospace, monospace; letter-spacing:2px; color:var(--ink); font-size:16px; }
+  .warn { background:#fff1e6; color:#a0521d; border-radius:10px; padding:10px 12px; font-size:13px; margin-bottom:14px; display:none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="top">
+    <svg viewBox="0 0 64 64" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M26 15a6 6 0 1 1 6 6v6"/>
+      <path d="M32 27 6 45h52z"/>
+      <rect x="24" y="47" width="16" height="12" rx="2" fill="#FFF8E7" stroke="none"/>
+    </svg>
+    <div class="brand">SHAKE RACK</div>
+    <h1 id="title">Seninle bir askılık paylaşıldı</h1>
+  </div>
+  <div class="body">
+    <p id="desc">Katılmak için uygulamada aç.</p>
+    <div class="warn" id="warn"></div>
+    <a class="btn" id="open" href="#">Shake Rack'te aç</a>
+    <a class="btn alt" id="dl" href="https://github.com/emolibor/shake-rack/releases/download/latest/shake-rack.apk">Uygulama yok mu? İndir (Android)</a>
+    <div class="code" id="codebox"></div>
+  </div>
+</div>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var k = (q.get('k') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  var n = q.get('n') || '';
+  var o = q.get('o') || '';
+  var apk = 'https://github.com/emolibor/shake-rack/releases/download/latest/shake-rack.apk';
+  var $ = function (id) { return document.getElementById(id); };
+
+  if (k.length !== 8) {
+    $('title').textContent = 'Bağlantı eksik';
+    $('desc').textContent = 'Bu bağlantı tam değil. Gönderen kişiden yeniden iste.';
+    $('open').style.display = 'none';
+    return;
+  }
+  if (n) $('title').textContent = '"' + n + '" askılığına davet';
+  $('desc').textContent = (o ? o + ' seninle bir askılık paylaştı. ' : '') +
+      'Uygulamada açınca katılma ekranı hazır gelir.';
+  $('codebox').innerHTML = 'Açılmazsa uygulamada <strong>+ Yeni → Kodla katıl</strong> ile bu kodu yaz:<br><b>' +
+      k.slice(0, 4) + '-' + k.slice(4) + '</b>';
+
+  var android = /android/i.test(navigator.userAgent);
+  var deep = 'shakerack://join?k=' + k;
+  var intent = 'intent://join?k=' + k +
+      '#Intent;scheme=shakerack;package=com.fourmis.shake_rack;' +
+      'S.browser_fallback_url=' + encodeURIComponent(apk) + ';end';
+  $('open').href = android ? intent : deep;
+
+  if (!android) {
+    var w = $('warn');
+    w.style.display = 'block';
+    w.textContent = 'Shake Rack şimdilik sadece Android telefonlarda çalışıyor.';
+    $('dl').style.display = 'none';
+  } else {
+    // uygulamayı hemen açmayı dene (tarayıcı izin vermezse butona dokunulur)
+    setTimeout(function () { location.href = intent; }, 400);
+  }
+})();
+</script>
+</body>
+</html>

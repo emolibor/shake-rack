@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:app_links/app_links.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'firebase_options.dart';
@@ -8,6 +11,7 @@ import 'screens/racks_page.dart';
 import 'screens/team_screen.dart';
 import 'services/store.dart';
 import 'services/updater.dart';
+import 'screens/share_sheets.dart';
 import 'widgets/rope_card.dart';
 
 /// Firebase kurulduysa true. Kurulmadıysa uygulama yine çalışır, sadece yerel.
@@ -65,7 +69,42 @@ class _HomeState extends State<_Home> {
     store.load().then((_) {
       setState(() => _loaded = true);
       _checkUpdate();
+      _listenInviteLinks();
     });
+  }
+
+  StreamSubscription<Uri>? _linkSub;
+  final Set<String> _handledLinks = {};
+
+  /// Davet bağlantısı (shakerack://join?k=KOD) → katılma ekranı kodla açılır.
+  void _listenInviteLinks() {
+    final links = AppLinks();
+    // uygulama bağlantıyla açıldıysa ilk bağlantı + açıkken gelenler
+    links.getInitialLink().then((u) {
+      if (u != null) _openInvite(u);
+    }).catchError((_) {});
+    _linkSub = links.uriLinkStream.listen(_openInvite, onError: (_) {});
+  }
+
+  void _openInvite(Uri uri) {
+    if (uri.scheme != 'shakerack' || uri.host != 'join') return;
+    final code = uri.queryParameters['k'] ?? '';
+    if (code.isEmpty || !_handledLinks.add(code) || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      setState(() => _tabKey = 'rack');
+      final b = await showJoinSheet(context, store, initialCode: code);
+      if (b != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('"${b.name}" askılığına katıldın 🤝')));
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _linkSub?.cancel();
+    super.dispose();
   }
 
   /// Açılışta sessizce yeni sürüm var mı bak; varsa sor.

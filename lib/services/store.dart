@@ -354,6 +354,14 @@ class RackStore extends ChangeNotifier {
         return;
       }
       final d = snap.data()!;
+      // eski kod bağlantıya taşındıysa: yeni belgeye geç
+      final moved = d['movedTo'];
+      if (moved is String && moved.isNotEmpty && moved != rackCode) {
+        rackCode = moved;
+        await _saveLocal();
+        _listen();
+        return;
+      }
       // sahip, izinler, kişiler ve geçmiş her zaman okunur
       projectsOwner = d['owner'] as String?;
       projectsPermission = d['permission'] == 'view' ? 'view' : 'edit';
@@ -530,6 +538,7 @@ class RackStore extends ChangeNotifier {
     final snap =
         await FirebaseFirestore.instance.collection('racks').doc(docId).get();
     if (!snap.exists) return null;
+    if (snap.data()?['movedTo'] != null) return null; // eski kod kapatıldı
     final d = {...snap.data()!, 'code': code, '_doc': docId};
     if (isProjectsData(d)) {
       d['name'] ??= d['projectsName'] ?? 'Projeler';
@@ -766,6 +775,58 @@ class RackStore extends ChangeNotifier {
     notifyListeners();
     await _saveLocal();
     return projects.shareCode!;
+  }
+
+  /// Davet bağlantısı (dokununca uygulamada katılma ekranı açılır).
+  static const inviteBase = 'https://emolibor.github.io/shake-rack/katil/';
+
+  /// Projeler eski tip (tahmin edilebilir) kodla mı paylaşılıyor?
+  bool get projectsOnLegacyCode =>
+      rackCode.isNotEmpty && !rackCode.startsWith('share_');
+
+  /// Paylaşılan askılığın davet bağlantısı; eski kodda boş.
+  String inviteLink(Board b) {
+    final code = b.shareCode;
+    if (code == null || code.length != 8) return '';
+    final owner = hasProfile ? profile.name : '';
+    return '$inviteBase?k=$code'
+        '&n=${Uri.encodeQueryComponent(b.name)}'
+        '${owner.isEmpty ? '' : '&o=${Uri.encodeQueryComponent(owner)}'}';
+  }
+
+  /// Eski ekip kodundan (ör. "fourmis-proje") rastgele bağlantıya geç.
+  /// Veri yeni belgeye kopyalanır, eski belge sadece yönlendirme olarak kalır:
+  /// şu an bağlı olanlar otomatik taşınır, eski kodu yeni deneyen giremez.
+  Future<String> migrateProjectsToLink() async {
+    if (!projectsOnLegacyCode) return projects.shareCode ?? '';
+    if (!firebaseReady) throw StateError('İnternet / Firebase bağlantısı yok.');
+    final old = _doc;
+    final snap = await old.get();
+    final data = snap.data() ?? {};
+    final code = newShareCode();
+    final newId = 'share_${code.toLowerCase()}';
+    projectsOwner ??= profile.id;
+    await FirebaseFirestore.instance.collection('racks').doc(newId).set({
+      ...data,
+      ..._toCloud(),
+      'kind': 'projects',
+      'owner': projectsOwner,
+      'ownerName': hasProfile ? profile.name : me.name,
+      'permission': projectsPermission,
+      'allowCopy': projectsAllowCopy,
+      'people': {
+        ...(data['people'] is Map ? Map<String, dynamic>.from(data['people']) : {}),
+        profile.id: _meEntry(ShareRole.owner),
+      },
+    });
+    await old.set({'movedTo': newId, 'updatedAt': FieldValue.serverTimestamp()});
+    _sub?.cancel();
+    rackCode = newId;
+    _syncProjectsShareState();
+    _listen();
+    notifyListeners();
+    await _saveLocal();
+    return code;
   }
 
   /// Sahip Projeler paylaşımını kapatır: kartlar sende kalır, diğerlerinde

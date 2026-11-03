@@ -8,8 +8,13 @@ import '../widgets/people.dart';
 const _apkUrl =
     'https://github.com/emolibor/shake-rack/releases/download/latest/shake-rack.apk';
 
-String _inviteText(Board b) {
+String _inviteText(RackStore store, Board b) {
   final perm = b.shareCanEdit ? 'birlikte düzenleyebiliriz' : 'sadece inceleyebilirsin';
+  final link = store.inviteLink(b);
+  if (b.isProjects && link.isNotEmpty) {
+    return '📌 Shake Rack\'te "${b.name}" askılığına seni davet ettim ($perm).\n\n'
+        'Katılmak için dokun:\n$link';
+  }
   return '📌 Shake Rack\'te "${b.name}" askılığını seninle paylaştım ($perm).\n\n'
       'Kod: ${b.shareCodePretty}\n\n'
       'Uygulamada: Askılık → + Yeni → Kodla katıl\n'
@@ -91,7 +96,83 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
           title: const Text('Kendi askılığına kopyalayabilsin'),
           subtitle: const Text('Bağımsız bir kopya alır; senin askılığını etkilemez.'),
         ),
-        if (shared) ...[
+        if (shared && b.isProjects && store.projectsOnLegacyCode) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF1E6),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Şu an "${b.shareCodePretty}" koduyla paylaşılıyor',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 4),
+                const Text(
+                  'Bu kod tahmin edilebilir. Bağlantıya geçince eski kod kapanır, '
+                  'yalnızca bağlantıyı gönderdiğin kişiler girebilir. Şu an bağlı olanlar '
+                  'kendiliğinden yeni bağlantıya taşınır.',
+                  style: TextStyle(fontSize: 12.5, color: Colors.black54, height: 1.35),
+                ),
+                const SizedBox(height: 10),
+                FilledButton.icon(
+                  onPressed: busy
+                      ? null
+                      : () => run(() async {
+                            if (!await ensureProfile(context, store)) return;
+                            await store.migrateProjectsToLink();
+                          }),
+                  icon: const Icon(Icons.link),
+                  label: const Text('Bağlantıya geç'),
+                ),
+              ],
+            ),
+          ),
+        ] else if (shared && b.isProjects) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF8E7),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE8DCC6)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.link, color: Color(0xFF6B4F2A)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('DAVET BAĞLANTISI',
+                          style: TextStyle(fontSize: 11, letterSpacing: 2, color: Colors.black45)),
+                      const SizedBox(height: 2),
+                      Text(store.inviteLink(b),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12.5, color: Color(0xFF2E6BB8))),
+                      const SizedBox(height: 2),
+                      const Text('Sadece bu bağlantıyı gönderdiğin kişiler girebilir.',
+                          style: TextStyle(fontSize: 11.5, color: Colors.black45)),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Kopyala',
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: store.inviteLink(b)));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Bağlantı kopyalandı')));
+                  },
+                  icon: const Icon(Icons.copy),
+                ),
+              ],
+            ),
+          ),
+        ] else if (shared) ...[
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.symmetric(vertical: 14),
@@ -169,17 +250,18 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
                 : () => run(() async {
                       if (!await ensureProfile(context, store)) return;
                       await store.shareBoard(b, canEdit: canEdit, allowCopy: allowCopy);
-                      await Share.share(_inviteText(b), subject: b.name);
+                      await Share.share(_inviteText(store, b), subject: b.name);
                     }),
             icon: busy
                 ? const SizedBox(
                     width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.ios_share),
-            label: const Text('Kod oluştur ve gönder'),
+            label: Text(b.isProjects ? 'Bağlantı oluştur ve gönder' : 'Kod oluştur ve gönder'),
           )
         else ...[
+          if (!(b.isProjects && store.projectsOnLegacyCode))
           FilledButton.icon(
-            onPressed: busy ? null : () => Share.share(_inviteText(b), subject: b.name),
+            onPressed: busy ? null : () => Share.share(_inviteText(store, b), subject: b.name),
             icon: const Icon(Icons.ios_share),
             label: const Text('Davet gönder (WhatsApp vb.)'),
           ),
@@ -214,10 +296,12 @@ Future<void> showShareSheet(BuildContext context, RackStore store, Board b) {
 // =====================================================================
 // Alıcı: kodla katıl
 // =====================================================================
-Future<Board?> showJoinSheet(BuildContext context, RackStore store) {
-  final ctrl = TextEditingController();
+Future<Board?> showJoinSheet(BuildContext context, RackStore store,
+    {String? initialCode}) {
+  final ctrl = TextEditingController(text: initialCode ?? '');
   Map<String, dynamic>? found;
   var busy = false;
+  var autoStarted = false;
   String? error;
 
   return showModalBottomSheet<Board>(
@@ -243,6 +327,12 @@ Future<Board?> showJoinSheet(BuildContext context, RackStore store) {
           error = '$e';
         }
         if (ctx.mounted) setS(() => busy = false);
+      }
+
+      // davet bağlantısından geldiyse kodu hemen ara
+      if (initialCode != null && !autoStarted) {
+        autoStarted = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) => find());
       }
 
       final d = found;

@@ -609,4 +609,28 @@ void main() {
     await again.load();
     expect(again.unseenCompleted, 0); // bakıldığı kayıtlı
   });
+
+  test('Projeler davet bağlantısı: rastgele kod, ad ve paylaşan bilgisi', () async {
+    final s = RackStore()
+      ..profile = const Member(id: 'p-me', name: 'Emirhan', color: Color(0xFF2E7DE0));
+    // eski tip kod: bağlantı yok, geçiş önerilir
+    SharedPreferences.setMockInitialValues({'cards_v1': '[]', 'rack_code_v1': 'fourmis-proje'});
+    final legacy = RackStore();
+    await legacy.load();
+    expect(legacy.projectsOnLegacyCode, isTrue);
+    expect(legacy.inviteLink(legacy.projects), isEmpty);
+
+    // yeni tip: share_<kod>
+    s.joinProjects({
+      'kind': 'projects', '_doc': 'share_k7p2qx9m', 'code': 'K7P2QX9M',
+      'owner': 'p-me', 'projectsName': 'Fourmis Projeler', 'cards': [],
+    });
+    expect(s.projectsOnLegacyCode, isFalse);
+    final link = s.inviteLink(s.projects);
+    expect(link, startsWith('https://emolibor.github.io/shake-rack/katil/?k=K7P2QX9M'));
+    final u = Uri.parse(link);
+    expect(u.queryParameters['k'], 'K7P2QX9M');
+    expect(u.queryParameters['n'], 'Fourmis Projeler');
+    expect(u.queryParameters['o'], 'Emirhan');
+  });
 }
