@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/models.dart';
 import '../services/store.dart';
 import '../widgets/people.dart';
@@ -23,6 +25,13 @@ class AdminScreen extends StatelessWidget {
         child: Scaffold(
           appBar: AppBar(
             title: const Text('Yönetim paneli'),
+            actions: [
+              IconButton(
+                tooltip: 'Projeler\'e davet et',
+                icon: const Icon(Icons.person_add_alt_1),
+                onPressed: () => showProjectsInvite(context, store),
+              ),
+            ],
             bottom: TabBar(tabs: [
               Tab(
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -81,6 +90,9 @@ class _Requests extends StatelessWidget {
                               text: r.name.isEmpty ? 'İsimsiz' : r.name,
                               style: const TextStyle(fontWeight: FontWeight.w700)),
                           const TextSpan(text: ', '),
+                          if (r.shareId == RackStore.projectsRequestId)
+                            TextSpan(text: ' "${store.projects.name}" askılığına erişim istiyor.')
+                          else ...[
                           TextSpan(
                               text: r.ownerName.isEmpty ? 'bir kullanıcının' : '${r.ownerName} adlı kişinin',
                               style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -88,11 +100,33 @@ class _Requests extends StatelessWidget {
                               text: r.boardName.isEmpty
                                   ? ' paylaştığı askılığa katılmak istiyor.'
                                   : ' "${r.boardName}" askılığına katılmak istiyor.'),
+                          ],
                         ])),
                       ),
                     ],
                   ),
                   const SizedBox(height: 6),
+                  if (r.shareId == RackStore.projectsRequestId)
+                    Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 6,
+                      children: [
+                        TextButton(
+                          style: TextButton.styleFrom(foregroundColor: Colors.red),
+                          onPressed: () => store.decideProjectsRequest(r, 'none'),
+                          child: const Text('Reddet'),
+                        ),
+                        OutlinedButton(
+                          onPressed: () => store.decideProjectsRequest(r, 'view'),
+                          child: const Text('Görür'),
+                        ),
+                        FilledButton(
+                          onPressed: () => store.decideProjectsRequest(r, 'edit'),
+                          child: const Text('Düzenler'),
+                        ),
+                      ],
+                    )
+                  else
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
@@ -145,6 +179,14 @@ class _Users extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: FilledButton.icon(
+            onPressed: () => showProjectsInvite(context, store),
+            icon: const Icon(Icons.person_add_alt_1),
+            label: Text('"${store.projects.name}" askılığına davet et'),
+          ),
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
           child: Text(
@@ -218,4 +260,58 @@ class _Empty extends StatelessWidget {
           ]),
         ),
       );
+}
+
+/// Projeler'e davet: uygulama indirme + erişim isteği bağlantısı.
+Future<void> showProjectsInvite(BuildContext context, RackStore store) {
+  final link = store.projectsInviteLink();
+  final text = '📌 Seni Shake Rack\'teki "${store.projects.name}" askılığına davet ediyorum.\n\n'
+      '1) Uygulama yoksa indir (Android):\n'
+      'https://github.com/emolibor/shake-rack/releases/download/latest/shake-rack.apk\n\n'
+      '2) Kurup adını girdikten sonra bu bağlantıya dokun:\n$link';
+  return showModalBottomSheet(
+    context: context,
+    showDragHandle: true,
+    builder: (ctx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('"${store.projects.name}" askılığına davet',
+                style: Theme.of(ctx).textTheme.titleLarge),
+            const SizedBox(height: 6),
+            const Text(
+              'Bağlantıya dokunan kişinin uygulamasından sana erişim isteği gelir. '
+              'Onaylar sekmesinde Görür ya da Düzenler seçersin; onaylamadan hiçbir şey göremez.',
+              style: TextStyle(color: Colors.black54, height: 1.35),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () => Share.share(text, subject: store.projects.name),
+              icon: const Icon(Icons.ios_share),
+              label: const Text('Davet gönder (WhatsApp vb.)'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: link));
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(const SnackBar(content: Text('Bağlantı kopyalandı')));
+              },
+              icon: const Icon(Icons.copy),
+              label: const Text('Bağlantıyı kopyala'),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Uygulamayı zaten kurmuş biriyse Kullanıcılar listesinde de görünür; '
+              'oradan doğrudan yetki verebilirsin.',
+              style: TextStyle(fontSize: 12, color: Colors.black45),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }

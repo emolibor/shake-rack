@@ -89,7 +89,8 @@ class _HomeState extends State<_Home> {
 
   void _openInvite(Uri uri) {
     if (uri.scheme != 'shakerack' || uri.host != 'join') return;
-    final code = uri.queryParameters['k'] ?? '';
+    final isProjects = uri.queryParameters['p'] == '1';
+    final code = isProjects ? 'PROJECTS' : (uri.queryParameters['k'] ?? '');
     if (code.isEmpty || !_handledLinks.add(code) || !mounted) return;
     final link = uri.toString(); // k + askılık adı + paylaşan bilgisi
     WidgetsBinding.instance.addPostFrameCallback((_) async {

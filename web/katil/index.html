@@ -53,12 +53,13 @@
 (function () {
   var q = new URLSearchParams(location.search);
   var k = (q.get('k') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  var proj = q.get('p') === '1';
   var n = q.get('n') || '';
   var o = q.get('o') || '';
   var apk = 'https://github.com/emolibor/shake-rack/releases/download/latest/shake-rack.apk';
   var $ = function (id) { return document.getElementById(id); };
 
-  if (k.length !== 8) {
+  if (!proj && k.length !== 8) {
     $('title').textContent = 'Bağlantı eksik';
     $('desc').textContent = 'Bu bağlantı tam değil. Gönderen kişiden yeniden iste.';
     $('open').style.display = 'none';
@@ -67,6 +68,8 @@
   if (n) $('title').textContent = '"' + n + '" askılığına davet';
   $('desc').textContent = (o ? o + ' seninle bir askılık paylaştı. ' : '') +
       'Uygulamada açınca katılma isteğin gönderilir; yönetici onaylayınca askılık sende belirir.';
+  if (proj) $('desc').textContent = (o ? o + ' seni davet etti. ' : '') +
+      'Uygulamada açınca erişim isteğin gönderilir; onaylanınca askılık sende belirir.';
   $('codebox').innerHTML = 'Açılmazsa bu sayfanın bağlantısını kopyala, uygulamada ' +
       '<strong>+ Yeni → Paylaşılan askılığa katıl</strong> kutusuna yapıştır.';
 
@@ -74,8 +77,9 @@
   var extra = (n ? '&n=' + encodeURIComponent(n) : '') +
       (o ? '&o=' + encodeURIComponent(o) : '') +
       (q.get('u') ? '&u=' + encodeURIComponent(q.get('u')) : '');
-  var deep = 'shakerack://join?k=' + k + extra;
-  var intent = 'intent://join?k=' + k + extra +
+  var head = proj ? 'p=1' : 'k=' + k;
+  var deep = 'shakerack://join?' + head + extra;
+  var intent = 'intent://join?' + head + extra +
       '#Intent;scheme=shakerack;package=com.fourmis.shake_rack;' +
       'S.browser_fallback_url=' + encodeURIComponent(apk) + ';end';
   $('open').href = android ? intent : deep;

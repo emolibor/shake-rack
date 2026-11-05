@@ -621,4 +621,17 @@ void main() {
     expect(RackStore.extractCode('abcd-2345'), 'abcd-2345'); // düz kod olduğu gibi
     expect(RackStore.normalizeCode(RackStore.extractCode('abcd-2345')), 'ABCD2345');
   });
+
+  test('Projeler davet bağlantısı erişim isteği taşır', () {
+    final s = RackStore()
+      ..uid = 'p-admin'
+      ..profile = const Member(id: 'p-admin', name: 'Emirhan', color: Color(0xFF2E7DE0));
+    s.updateBoard(s.projects, name: 'Ekip İşleri');
+    final link = s.projectsInviteLink();
+    final params = RackStore.linkParams('Bu bağlantıya dokun:\n$link');
+    expect(link, startsWith('https://emolibor.github.io/shake-rack/katil/?p=1'));
+    expect(params['p'], '1');
+    expect(params['n'], 'Ekip İşleri');
+    expect(params['o'], 'Emirhan');
+  });
 }

@@ -768,6 +768,59 @@ class RackStore extends ChangeNotifier {
         '${uid.isEmpty ? '' : '&u=$uid'}';
   }
 
+  /// Projeler'e davet bağlantısı (yönetici gönderir). Dokunan kişinin
+  /// uygulamasından yöneticiye erişim isteği gelir.
+  String projectsInviteLink() {
+    final owner = hasProfile ? profile.name : '';
+    return '$inviteBase?p=1'
+        '&n=${Uri.encodeQueryComponent(projects.name)}'
+        '${owner.isEmpty ? '' : '&o=${Uri.encodeQueryComponent(owner)}'}';
+  }
+
+  static const projectsRequestId = 'PROJECTS';
+
+  /// Projeler'e erişim iste (davet bağlantısından). Yönetici onaylarken
+  /// Görür / Düzenler seçer.
+  Future<JoinRequest?> requestProjectsAccess({String boardName = '', String ownerName = ''}) async {
+    if (!firebaseReady || !signedIn) throw StateError('İnternet bağlantısı yok.');
+    if (!hasProfile) throw StateError('Önce adını gir.');
+    if (isAdmin) throw StateError('Yöneticisin; Projeler zaten sende.');
+    if (projectsLinked) throw StateError('Projeler\'e zaten erişimin var.');
+    final id = '${projectsRequestId}_$uid';
+    final ref = _db.collection('joinRequests').doc(id);
+    final data = {
+      'shareId': projectsRequestId,
+      'uid': uid,
+      'name': profile.name,
+      'emoji': profile.emoji,
+      'color': profile.color.value,
+      'boardName': boardName.isEmpty ? 'Projeler' : boardName,
+      'ownerName': ownerName,
+      'ownerUid': '',
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+    try {
+      await ref.delete();
+    } catch (_) {}
+    await ref.set(data);
+    final r = JoinRequest.fromDoc(id, {...data, 'createdAt': null});
+    myJoins[projectsRequestId] = r;
+    notifyListeners();
+    return r;
+  }
+
+  /// Yönetici: Projeler erişim isteğini yanıtla (none = reddet).
+  Future<void> decideProjectsRequest(JoinRequest r, String access) async {
+    if (!isAdmin) return;
+    if (access != 'none') {
+      final u = users.cast<AppUser?>().firstWhere((x) => x!.uid == r.uid, orElse: () => null) ??
+          AppUser(uid: r.uid, name: r.name, emoji: r.emoji, color: r.color);
+      await setProjectsAccess(u, access);
+    }
+    await decideJoin(r, access != 'none');
+  }
+
   Future<void> _createShare(Board b,
       {required String code, required bool canEdit, required bool allowCopy}) async {
     b.shareCode = code;
@@ -845,6 +898,11 @@ class RackStore extends ChangeNotifier {
     if (!firebaseReady || !signedIn) throw StateError('İnternet bağlantısı yok.');
     if (!hasProfile) throw StateError('Önce adını gir.');
     final params = linkParams(raw);
+    if (params['p'] == '1') {
+      final r = await requestProjectsAccess(
+          boardName: params['n'] ?? '', ownerName: params['o'] ?? '');
+      return r!;
+    }
     final code = normalizeCode(extractCode(raw.trim()));
     if (code.length != 8) throw StateError('Bağlantı geçersiz.');
     if (custom.any((b) => b.shareCode == code)) {
@@ -901,7 +959,8 @@ class RackStore extends ChangeNotifier {
       myJoins = next;
       notifyListeners();
       for (final r in next.values.where((r) => r.status == 'approved')) {
-        if (custom.any((b) => b.shareCode == r.shareId)) {
+        if (r.shareId == projectsRequestId || custom.any((b) => b.shareCode == r.shareId)) {
+          // Projeler: yetki kullanıcı belgesinden gelir; diğerleri: zaten katıldık
           // katıldık; isteği temizle
           try {
             await _db.collection('joinRequests').doc(r.id).delete();
