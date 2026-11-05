@@ -985,7 +985,15 @@ class RackStore extends ChangeNotifier {
         break;
       } catch (_) {}
     }
-    if (data == null) return; // paylaşım kapatılmış olabilir
+    if (data == null) {
+      // onaylandı ama paylaşım bu arada kapatılmış: isteği temizle
+      try {
+        await _db.collection('joinRequests').doc(r.id).delete();
+      } catch (_) {}
+      myJoins.remove(r.shareId);
+      notifyListeners();
+      return;
+    }
     attachShared(data, r.shareId);
     try {
       await _db.collection('joinRequests').doc(r.id).delete();
