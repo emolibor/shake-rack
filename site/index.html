@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shake Rack</title>
+<script>
+  // iPhone / bilgisayar → web sürümü, Android → uygulama indirme
+  location.replace(/android/i.test(navigator.userAgent)
+    ? 'https://github.com/emolibor/shake-rack/releases/download/latest/shake-rack.apk'
+    : '/shake-rack/app/');
+</script>
+</head>
+<body style="font-family:system-ui;background:#EFE6D6;padding:24px">
+<a href="/shake-rack/app/">Shake Rack'i aç</a>
+</body>
+</html>

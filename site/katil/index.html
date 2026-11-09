@@ -85,10 +85,14 @@
   $('open').href = android ? intent : deep;
 
   if (!android) {
+    // iPhone / bilgisayar: web sürümünde aç
+    var web = '/shake-rack/app/?' + head + extra;
+    $('open').href = web;
+    $('open').textContent = 'Shake Rack\'i aç (web)';
+    $('dl').style.display = 'none';
     var w = $('warn');
     w.style.display = 'block';
-    w.textContent = 'Shake Rack şimdilik sadece Android telefonlarda çalışıyor.';
-    $('dl').style.display = 'none';
+    w.textContent = 'iPhone\'da açılınca Safari\'de Paylaş → Ana Ekrana Ekle ile uygulama gibi kullanabilirsin.';
   } else {
     // uygulamayı hemen açmayı dene (tarayıcı izin vermezse butona dokunulur)
     setTimeout(function () { location.href = intent; }, 400);

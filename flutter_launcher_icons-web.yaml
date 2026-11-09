@@ -1,0 +1,10 @@
+# Web sürümü ikonları (Pages iş akışında kullanılır)
+flutter_launcher_icons:
+  android: false
+  ios: false
+  image_path: assets/icon.png
+  web:
+    generate: true
+    image_path: assets/icon.png
+    background_color: "#EFE6D6"
+    theme_color: "#8B6A3E"

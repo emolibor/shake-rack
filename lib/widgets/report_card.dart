@@ -1,10 +1,8 @@
-import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -273,18 +271,14 @@ class ReportExport {
     return (data!.buffer.asUint8List(), image.width, image.height);
   }
 
-  static Future<File> _write(String name, List<int> bytes) async {
-    final dir = await getTemporaryDirectory();
-    final f = File('${dir.path}/$name');
-    await f.writeAsBytes(bytes, flush: true);
-    return f;
-  }
+  /// Bellekten paylaş (Android ve web'de aynı şekilde çalışır).
+  static Future<void> _share(Uint8List bytes, String name, String mime, String subject) =>
+      Share.shareXFiles([XFile.fromData(bytes, name: name, mimeType: mime)],
+          fileNameOverrides: [name], subject: subject);
 
   static Future<void> sharePng(Report r, GlobalKey key) async {
     final (png, _, __) = await _capture(key);
-    final f = await _write('${r.fileBase}.png', png);
-    await Share.shareXFiles([XFile(f.path, mimeType: 'image/png')],
-        subject: r.title);
+    await _share(png, '${r.fileBase}.png', 'image/png', r.title);
   }
 
   static Future<void> sharePdf(Report r, GlobalKey key) async {
@@ -298,9 +292,7 @@ class ReportExport {
       pageFormat: PdfPageFormat(pageW, imgH + margin * 2, marginAll: margin),
       build: (_) => pw.Image(pw.MemoryImage(png), width: imgW, height: imgH),
     ));
-    final f = await _write('${r.fileBase}.pdf', await doc.save());
-    await Share.shareXFiles([XFile(f.path, mimeType: 'application/pdf')],
-        subject: r.title);
+    await _share(await doc.save(), '${r.fileBase}.pdf', 'application/pdf', r.title);
   }
 
   static Future<void> shareText(Report r) =>

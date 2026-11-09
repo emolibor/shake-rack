@@ -73,7 +73,7 @@ Uygulama Firebase olmadan da çalışır (yerel mod). Ortak askılık için bir 
    ```
    Android'de `minSdkVersion` 21+ ve iOS'ta deployment target 13+ olmalı (flutterfire uyarırsa artır).
 5. Uygulamada bir askılığa uzun bas → **Paylaş** → bağlantıyı gönder. Bağlantıya dokunan
-   kişide uygulama açılır ve katılma ekranı hazır gelir (davet sayfası: `web/katil/`).
+   kişide uygulama açılır ve katılma ekranı hazır gelir (davet sayfası: `site/katil/`).
 
 Çalışma mantığı: paylaşılan her askılık Firestore'da `racks/share_<rastgele-anahtar>` belgesinde
 durur; anahtar sadece davet bağlantısında bulunur. Listeleme kurallarla kapalıdır

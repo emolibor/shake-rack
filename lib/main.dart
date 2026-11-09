@@ -113,6 +113,14 @@ class _HomeState extends State<_Home> {
 
   /// Davet bağlantısı (shakerack://join?k=KOD) → katılma ekranı kodla açılır.
   void _listenInviteLinks() {
+    if (kIsWeb) {
+      // web: davet bilgisi sayfa adresinde (…/app/?k=KOD&n=… ya da ?p=1)
+      final q = Uri.base.queryParameters;
+      if (q.containsKey('k') || q['p'] == '1') {
+        _openInvite(Uri.parse('shakerack://join?${Uri.base.query}'));
+      }
+      return;
+    }
     final links = AppLinks();
     // uygulama bağlantıyla açıldıysa ilk bağlantı + açıkken gelenler
     links.getInitialLink().then((u) {

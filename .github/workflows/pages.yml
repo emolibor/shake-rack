@@ -1,9 +1,9 @@
-name: Davet sayfası (GitHub Pages)
+name: Web sürümü + davet sayfası (GitHub Pages)
 
 on:
   push:
     branches: [main]
-    paths: ['web/**', '.github/workflows/pages.yml']
+    paths: ['lib/**', 'site/**', 'assets/**', 'pubspec.yaml', 'flutter_launcher_icons-web.yaml', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -23,9 +23,55 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # Flutter web iskeleti (lib/ ve pubspec.yaml'a dokunmaz)
+      - name: Web iskeleti
+        run: |
+          flutter create --org com.fourmis --project-name shake_rack --platforms web .
+          rm -f test/widget_test.dart
+
+      - run: flutter pub get
+
+      - name: İkon ve başlık
+        run: |
+          dart run flutter_launcher_icons -f flutter_launcher_icons-web.yaml
+          python3 - <<'PY'
+          import json, re, pathlib
+          idx = pathlib.Path('web/index.html')
+          t = idx.read_text()
+          t = re.sub(r'<title>.*?</title>', '<title>Shake Rack</title>', t)
+          t = t.replace('content="shake_rack"', 'content="Shake Rack"')
+          t = re.sub(r'<meta name="description" content="[^"]*">',
+                     '<meta name="description" content="Askılık: ipe asılı notlar ve projeler">', t)
+          if 'theme-color' not in t:
+              t = t.replace('</head>', '  <meta name="theme-color" content="#8B6A3E">\n</head>')
+          idx.write_text(t)
+          m = pathlib.Path('web/manifest.json')
+          j = json.loads(m.read_text())
+          j.update(name='Shake Rack', short_name='Shake Rack', description='Askılık',
+                   background_color='#EFE6D6', theme_color='#8B6A3E', start_url='.', display='standalone')
+          m.write_text(json.dumps(j, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Web derle
+        run: flutter build web --release --base-href /shake-rack/app/
+
+      - name: Siteyi birleştir
+        run: |
+          mkdir -p _site
+          cp -r site/. _site/
+          mkdir -p _site/app
+          cp -r build/web/. _site/app/
+          ls _site _site/app | head -40
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4

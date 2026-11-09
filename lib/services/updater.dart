@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:open_filex/open_filex.dart';
@@ -34,7 +35,8 @@ class Updater {
 
   /// Yeni sürüm varsa bilgisini döner, yoksa / hata olursa null.
   static Future<UpdateInfo?> check() async {
-    if (!Platform.isAndroid) return null;
+    // web'de güncelleme kendiliğinden gelir; APK güncelleyici sadece Android'de
+    if (kIsWeb || !Platform.isAndroid) return null;
     try {
       final p = await PackageInfo.fromPlatform();
       // İşlemciye göre ayrık APK'larda Android sürüm kodu "ABI×1000 + derleme"
