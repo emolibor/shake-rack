@@ -76,10 +76,19 @@ jobs:
       - name: APK derle
         run: |
           # İşlemciye göre ayrı APK + küçültülmüş Dart kodu
+          set -o pipefail
           flutter build apk --release --split-per-abi \
             --obfuscate --split-debug-info=build/symbols \
             --build-number=${{ github.run_number }} \
-            --build-name=1.0.${{ github.run_number }}
+            --build-name=1.0.${{ github.run_number }} 2>&1 | tee build.log
+
+      - name: Derleme hatasını göster
+        if: failure()
+        run: |
+          grep -iE "error|exception|failed|what went wrong|unresolved|cannot|not found" build.log \
+            | grep -v "^\s*$" | head -25 | while IFS= read -r l; do
+              echo "::error::$(echo "$l" | cut -c1-400)"
+            done
 
       - name: APK adını düzenle
         run: |
