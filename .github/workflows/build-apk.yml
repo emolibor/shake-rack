@@ -60,6 +60,15 @@ jobs:
           echo "SR_STORE_PASSWORD=$PW" >> "$GITHUB_ENV"
           keytool -list -keystore android/app/upload.jks -storepass "$PW" | grep -i "SHA-256"
 
+      # Gradle önbelleği: her derlemede yeniden indirme olmasın (ağ hatalarına karşı)
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/wrapper
+            ~/.gradle/caches
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/**/*.gradle*') }}
+          restore-keys: gradle-${{ runner.os }}-
+
       - run: flutter pub get
 
       - name: Testler (mesaj ekranı soruları)
@@ -77,10 +86,14 @@ jobs:
         run: |
           # İşlemciye göre ayrı APK + küçültülmüş Dart kodu
           set -o pipefail
-          flutter build apk --release --split-per-abi \
-            --obfuscate --split-debug-info=build/symbols \
-            --build-number=${{ github.run_number }} \
-            --build-name=1.0.${{ github.run_number }} 2>&1 | tee build.log
+          build() {
+            flutter build apk --release --split-per-abi \
+              --obfuscate --split-debug-info=build/symbols \
+              --build-number=${{ github.run_number }} \
+              --build-name=1.0.${{ github.run_number }} 2>&1 | tee build.log
+          }
+          # geçici ağ hatasında (ör. Gradle indirme 5xx) bir kez daha dene
+          build || { echo "Tekrar deneniyor…"; sleep 20; build; }
 
       - name: Derleme hatasını göster
         if: failure()
