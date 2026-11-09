@@ -88,6 +88,23 @@ if "useLegacyPackaging" not in t:
 gradle.write_text(t)
 print(f"✓ {gradle}: minSdk 23 + sabit imza + sıkıştırılmış kütüphaneler")
 
+# ---------- Gradle indirme adresi ----------
+# Bazı Flutter sürümleri Gradle'ı github.com/gradle/gradle-distributions'tan
+# indiriyor; o adres zaman zaman 5xx veriyor. Resmi sunucuya ve küçük "bin"
+# paketine çevir.
+wp = pathlib.Path("android/gradle/wrapper/gradle-wrapper.properties")
+if wp.exists():
+    w = wp.read_text()
+    w2 = re.sub(
+        r"distributionUrl=.*?gradle-([0-9.]+(?:-[a-z0-9]+)?)-(?:all|bin)\.zip",
+        lambda m: "distributionUrl=https\\://services.gradle.org/distributions/gradle-"
+        + m.group(1) + "-bin.zip",
+        w,
+    )
+    if w2 != w:
+        wp.write_text(w2)
+    print("✓ Gradle adresi:", [l for l in w2.splitlines() if l.startswith("distributionUrl")][0])
+
 # ---------- AndroidManifest.xml ----------
 mf = app / "src/main/AndroidManifest.xml"
 m = mf.read_text()
