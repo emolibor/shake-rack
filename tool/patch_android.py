@@ -65,8 +65,28 @@ if "upload.jks" not in t:
         fail("buildTypes bloğu bulunamadı")
     t = new[:idx] + block + new[idx:]
 
+# Yerel kütüphaneleri sıkıştırarak paketle → indirme boyutu ~%40 küçülür
+if "useLegacyPackaging" not in t:
+    pack = ('''    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+''' if gradle is kts else '''    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+
+''')
+    idx = t.find("    buildTypes {")
+    if idx < 0:
+        fail("buildTypes bloğu bulunamadı (sıkıştırma eklenemedi)")
+    t = t[:idx] + pack + t[idx:]
+
 gradle.write_text(t)
-print(f"✓ {gradle}: minSdk 23 + sabit imza")
+print(f"✓ {gradle}: minSdk 23 + sabit imza + sıkıştırılmış kütüphaneler")
 
 # ---------- AndroidManifest.xml ----------
 mf = app / "src/main/AndroidManifest.xml"

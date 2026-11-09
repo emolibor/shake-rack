@@ -263,7 +263,19 @@ class RackStore extends ChangeNotifier {
     return changed;
   }
 
-  Future<void> _saveLocal() async {
+  /// Kayıtları birleştir: art arda gelen değişiklikler (hızlı tikler, eşitleme)
+  /// tek bir yazmada toplanır → daha az disk işi, takılma yok.
+  Future<void>? _savePending;
+  Future<void> _saveLocal() => _savePending ??= Future(() async {
+        _savePending = null;
+        try {
+          await _writeLocal();
+        } catch (e) {
+          debugPrint('Yerel kayıt başarısız: $e');
+        }
+      });
+
+  Future<void> _writeLocal() async {
     final p = await SharedPreferences.getInstance();
     await p.setString(
         _kCards, jsonEncode(projects.cards.map((e) => e.toJson()).toList()));

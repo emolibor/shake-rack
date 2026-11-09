@@ -29,7 +29,7 @@ jobs:
       - name: Platform iskeleti
         run: |
           if [ ! -d android ]; then
-            flutter create --org com.fourmis --project-name shake_rack --platforms android,ios .
+            flutter create --org com.fourmis --project-name shake_rack --platforms android .
             rm -f test/widget_test.dart
           fi
 
@@ -75,12 +75,18 @@ jobs:
 
       - name: APK derle
         run: |
-          flutter build apk --release \
+          # İşlemciye göre ayrı APK + küçültülmüş Dart kodu
+          flutter build apk --release --split-per-abi \
+            --obfuscate --split-debug-info=build/symbols \
             --build-number=${{ github.run_number }} \
             --build-name=1.0.${{ github.run_number }}
 
       - name: APK adını düzenle
-        run: cp build/app/outputs/flutter-apk/app-release.apk shake-rack.apk
+        run: |
+          # shake-rack.apk = modern telefonlar (arm64), shake-rack-arm32.apk = eski 32-bit
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk shake-rack.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk shake-rack-arm32.apk
+          ls -la shake-rack*.apk
 
       # Uygulama açılışta bu dosyaya bakıp yeni sürüm olup olmadığını anlar.
       - name: version.json
@@ -95,14 +101,17 @@ jobs:
               "name": "1.0." + os.environ["GITHUB_RUN_NUMBER"],
               "notes": msg[0] if msg else "",
               "apk": "https://github.com/emolibor/shake-rack/releases/download/latest/shake-rack.apk",
+              "apk_arm32": "https://github.com/emolibor/shake-rack/releases/download/latest/shake-rack-arm32.apk",
           }, open("version.json", "w"), ensure_ascii=False)
           PY
           cat version.json
 
+      # Hata ayıklama sembolleri (küçültülmüş kodun hata kayıtlarını çözmek için)
       - uses: actions/upload-artifact@v4
         with:
-          name: shake-rack-apk
-          path: shake-rack.apk
+          name: debug-symbols-${{ github.run_number }}
+          path: build/symbols
+          retention-days: 90
 
       # "latest" sürümünü her seferinde güncelle → telefondan hep aynı linkten indir.
       - name: Releases'a yükle
@@ -117,6 +126,7 @@ jobs:
             Sürüm: 1.0.${{ github.run_number }} · ${{ github.sha }}
           files: |
             shake-rack.apk
+            shake-rack-arm32.apk
             version.json
           make_latest: true
           prerelease: false

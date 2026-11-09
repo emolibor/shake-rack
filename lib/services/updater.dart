@@ -37,17 +37,23 @@ class Updater {
     if (!Platform.isAndroid) return null;
     try {
       final p = await PackageInfo.fromPlatform();
-      final current = int.tryParse(p.buildNumber) ?? 0;
+      // İşlemciye göre ayrık APK'larda Android sürüm kodu "ABI×1000 + derleme"
+      // (ör. arm64 → 2026). Karşılaştırma için derleme numarasını al.
+      final current = (int.tryParse(p.buildNumber) ?? 0) % 1000;
       final r = await http
           .get(Uri.parse('$_versionUrl?t=${DateTime.now().millisecondsSinceEpoch}'))
           .timeout(const Duration(seconds: 12));
       if (r.statusCode != 200) return null;
       final j = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+      // 32-bit (eski) telefonlara kendi APK'sı
+      final arm32 = Platform.version.contains('android_arm"') ||
+          Platform.version.contains('"android_arm"');
+      final apk = (arm32 ? j['apk_arm32'] as String? : null) ?? j['apk'] as String;
       final info = UpdateInfo(
         (j['build'] as num).toInt(),
         j['name'] as String? ?? '',
         j['notes'] as String? ?? '',
-        j['apk'] as String,
+        apk,
       );
       return info.build > current ? info : null;
     } catch (e) {

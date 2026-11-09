@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:app_links/app_links.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'firebase_options.dart';
 import 'screens/chat_screen.dart';
@@ -20,9 +23,40 @@ bool firebaseReady = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Beklenmedik hatalar uygulamayı kapatmasın: kaydet, devam et.
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('Yakalanmamış hata: $error');
+    return true; // işlendi say → uygulama çökmez
+  };
+  // Release'te kırmızı hata ekranı yerine sade bir kutu
+  if (kReleaseMode) {
+    ErrorWidget.builder = (details) => const Material(
+          color: Color(0xFFEFE6D6),
+          child: Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Bu bölüm yüklenemedi.\nUygulamayı kapatıp açmayı dene.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.black54),
+              ),
+            ),
+          ),
+        );
+  }
+
   try {
     await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform);
+    // çevrimdışı önbellek (bağlantı gidip gelince veri kaybolmasın)
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+      cacheSizeBytes: 40 * 1024 * 1024,
+    );
     firebaseReady = true;
   } catch (e) {
     debugPrint('Firebase başlatılamadı, yerel modda: $e');
