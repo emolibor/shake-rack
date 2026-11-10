@@ -128,4 +128,72 @@ void main() {
       expect(bot.reply("Örnek Tekstil'in durumu").report, isNull);
     });
   });
+
+  group('Kelime süzgeci', () {
+    test('adında tekstil geçenler', () {
+      const q = 'içinde tekstil geçenleri listele';
+      show(q);
+      final r = bot.reply(q);
+      expect(r.text, contains('Örnek Tekstil'));
+      expect(r.text, isNot(contains('Mavi')));
+      expect(r.text, isNot(contains('Kuzey')));
+      expect(r.report!.rows.single.title, 'Örnek Tekstil');
+      expect(r.report!.subtitle, contains('"tekstil" geçenler'));
+    });
+
+    test('firma hariç', () {
+      const q = 'mavi hariç kalanları listele';
+      show(q);
+      final a = bot.answer(q);
+      expect(a, contains('Örnek'));
+      expect(a, contains('Kuzey'));
+      expect(a, isNot(contains('Mavi')));
+    });
+
+    test('birden çok kelime: "x ve y hariç"', () {
+      final a = bot.answer('mavi ve kuzey hariç kalanlar');
+      expect(a, contains('Örnek'));
+      expect(a, isNot(contains('Mavi')));
+      expect(a, isNot(contains('Kuzey')));
+    });
+
+    test('tırnaklı ifade geçmeyenler', () {
+      final a = bot.answer('"mavi ambalaj" geçmeyenleri listele');
+      expect(a, isNot(contains('Mavi')));
+      expect(a, contains('Kuzey'));
+    });
+
+    test('proje türü hariç', () {
+      const q = 'elektrik hariç kalanlar';
+      show(q);
+      final r = bot.reply(q).report!;
+      for (final row in r.rows) {
+        expect(row.items, isNot(contains('Elektrik')));
+        expect(row.doneItems, isNot(contains('Elektrik')));
+      }
+      // Mavi'nin sadece rafı kalır
+      expect(r.rows.firstWhere((e) => e.title == 'Mavi Ambalaj').items, ['Raf Yerleşim']);
+    });
+
+    test('eşleşme yoksa dürüstçe söyler', () {
+      final a = bot.answer('zeytin geçenleri listele');
+      expect(a, contains('uyan'));
+      expect(bot.reply('zeytin geçenleri listele').report, isNull);
+    });
+
+    test('kelime süzgeci + tür birlikte', () {
+      final a = bot.answer('tekstil geçen mimari projesi kalanlar');
+      expect(a, contains('Örnek'));
+      expect(a, isNot(contains('Kuzey')));
+    });
+  });
+
+  test('kalanlar raporunda bitenler yeşil olarak ayrıca gelir', () {
+    final r = bot.reply('hangi projeler kaldı').report!;
+    final ornek = r.rows.first;
+    expect(ornek.doneItems, ['Elektrik']);
+    expect(r.rows[1].doneItems, isEmpty);
+    expect(r.toText(), contains('Bitti: ✅ Elektrik'));
+    expect(bot.answer('hangi projeler kaldı'), contains('(bitti: Elektrik)'));
+  });
 }

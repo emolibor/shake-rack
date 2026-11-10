@@ -9,12 +9,15 @@ class ReportRow {
   final String? owner;
   final Color? ownerColor;
   final List<String> items; // gösterilecek proje etiketleri
+  /// Kalanlar raporunda firmanın biten projeleri (yeşil, tikli gösterilir).
+  final List<String> doneItems;
   final int done; // firmanın biten proje sayısı
   final int total; // firmanın toplam proje sayısı
 
   const ReportRow({
     required this.title,
     required this.items,
+    this.doneItems = const [],
     this.owner,
     this.ownerColor,
     this.done = 0,
@@ -60,7 +63,12 @@ class Report {
       final r = rows[i];
       final owner = r.owner != null ? ' (${r.owner})' : '';
       b.writeln('${i + 1}. *${r.title}*$owner');
-      if (r.items.isNotEmpty) b.writeln('   ${r.items.join(' · ')}');
+      if (r.doneItems.isEmpty) {
+        if (r.items.isNotEmpty) b.writeln('   ${r.items.join(' · ')}');
+      } else {
+        if (r.items.isNotEmpty) b.writeln('   Kalan: ${r.items.join(' · ')}');
+        b.writeln('   Bitti: ${r.doneItems.map((e) => '✅ $e').join(' · ')}');
+      }
     }
     b.write('\n$summary');
     return b.toString();

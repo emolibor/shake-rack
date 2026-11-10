@@ -76,6 +76,163 @@ class RackAssistant {
   /// Son cevapta üretilen rapor (liste sorularında).
   Report? _report;
 
+  // ----- kelime süzgeci ("tekstil geçenler", "mavi hariç") -----
+  /// Firma adında/notunda geçmesi gereken kelimeler.
+  List<String> _incFirm = [];
+  /// Firma adında/notunda geçmemesi gereken kelimeler.
+  List<String> _excFirm = [];
+  /// Listeden çıkarılacak proje türleri ("elektrik hariç").
+  Set<String> _excTypes = {};
+  /// Raporda gösterilecek süzgeç açıklaması.
+  List<String> _filterLabels = [];
+
+  static const _incKeys = {
+    'gecen', 'gecenler', 'gecenleri', 'gecenlerin', 'iceren', 'icerenler',
+    'icerenleri', 'olan', 'olanlar', 'olanlari',
+  };
+  static const _excKeys = {
+    'haric', 'harici', 'haricindekiler', 'haricinde', 'disinda', 'disindakiler',
+    'disindakileri', 'gecmeyen', 'gecmeyenler', 'gecmeyenleri', 'icermeyen',
+    'icermeyenler', 'icermeyenleri', 'olmayan', 'olmayanlar', 'olmayanlari',
+  };
+  /// Kelime ile anahtar arasında kalabilen dolgu kelimeleri.
+  static const _fill = {
+    'kelimesi', 'kelimeleri', 'kelime', 'ifadesi', 'yazisi', 'ismi', 'adi',
+    'isminde', 'adinda', 'icinde', 'firma', 'firmalar', 'firmalari', 'proje',
+    'projesi', 'projeleri',
+  };
+  static const _joiners = {'ve', 'veya', 'ya', 'da', 'ile', 'yada'};
+
+  /// "içinde tekstil geçenleri listele", "mavi ve kuzey hariç", "'örnek a' geçmeyenler"
+  /// gibi ifadeleri bulur, süzgece çevirir ve sorudan çıkarır (geri kalan soru
+  /// tür/kişi aramasına gider).
+  String _parseFilters(String q) {
+    _incFirm = [];
+    _excFirm = [];
+    _excTypes = {};
+    _filterLabels = [];
+    final inc = <String>[], exc = <String>[];
+
+    // tırnaklı ifade: "mavi ambalaj" geçenler
+    q = q.replaceAllMapped(
+        RegExp('["“”\'‘’]([^"“”\'‘’]{2,})["“”\'‘’]\\s+([a-z]+)'), (m) {
+      final key = m[2]!;
+      if (_incKeys.contains(key)) {
+        inc.add(m[1]!.trim());
+        return ' ';
+      }
+      if (_excKeys.contains(key)) {
+        exc.add(m[1]!.trim());
+        return ' ';
+      }
+      return m[0]!;
+    });
+
+    // ek kesme işareti: "mavi'yi" → "mavi"
+    final toks = q
+        .replaceAll(RegExp("['’][a-z]*"), '')
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((w) => w.isNotEmpty)
+        .toList();
+    final drop = <int>{};
+    for (var i = 0; i < toks.length; i++) {
+      final isInc = _incKeys.contains(toks[i]);
+      final isExc = _excKeys.contains(toks[i]);
+      if (!isInc && !isExc) continue;
+      // "olan" tek başına çok genel: sadece önünde dolgu/kelime varsa ve
+      // "kalan/biten olan" değilse say
+      final terms = <String>[];
+      var j = i - 1;
+      final used = <int>{i};
+      while (j >= 0 && _fill.contains(toks[j])) {
+        used.add(j);
+        j--;
+      }
+      while (j >= 0) {
+        final w = toks[j];
+        if (_fill.contains(w) || _incKeys.contains(w) || _excKeys.contains(w)) break;
+        terms.add(w);
+        used.add(j);
+        j--;
+        // "x ve y", "x veya y", "x ya da y"
+        var k = j;
+        while (k >= 0 && _joiners.contains(toks[k])) {
+          k--;
+        }
+        if (k == j || k < 0) break;
+        for (var m = k + 1; m <= j; m++) {
+          used.add(m);
+        }
+        j = k;
+      }
+      terms.removeWhere((w) =>
+          w.length < 2 ||
+          const {'kalan', 'biten', 'bitmis', 'kalmis', 'hangi', 'icinde'}.contains(w));
+      if (terms.isEmpty) continue;
+      (isInc ? inc : exc).addAll(terms.reversed);
+      drop.addAll(used);
+    }
+    if (inc.isEmpty && exc.isEmpty) return q;
+
+    // süzgeci ayır: firma adında geçiyorsa firma süzgeci, değilse proje türü
+    for (final w in inc) {
+      if (_firmMatchesAny(w)) {
+        _incFirm.add(w);
+        _filterLabels.add('"$w" geçenler');
+      } else if (_typesIn(w).isNotEmpty) {
+        // tür adı → normal tür süzgecine bırak (sorunun içinde kalsın)
+        continue;
+      } else {
+        _incFirm.add(w); // hiç eşleşmese de dürüstçe "yok" desin
+        _filterLabels.add('"$w" geçenler');
+      }
+    }
+    for (final w in exc) {
+      final types = _firmMatchesAny(w) ? <String>{} : _typesIn(w);
+      if (types.isNotEmpty) {
+        _excTypes.addAll(types);
+        _filterLabels.add('${_typesLabel(types)} hariç');
+      } else {
+        _excFirm.add(w);
+        _filterLabels.add('"$w" hariç');
+      }
+    }
+    // tür olarak "geçen" kelimeler soruda kalsın, gerisini çıkar
+    final keepTypeWords = inc.where((w) => !_incFirm.contains(w)).toSet();
+    final rest = <String>[];
+    for (var i = 0; i < toks.length; i++) {
+      if (!drop.contains(i) || keepTypeWords.contains(toks[i])) rest.add(toks[i]);
+    }
+    return rest.join(' ');
+  }
+
+  bool get _hasFilter =>
+      _incFirm.isNotEmpty || _excFirm.isNotEmpty || _excTypes.isNotEmpty;
+
+  /// Firma adı + notunun normalize hali.
+  static String _firmText(CompanyCard c) => _norm('${c.name} ${c.notes}');
+
+  static bool _contains(String text, String term) {
+    if (text.contains(term)) return true;
+    final st = _stem(term);
+    return st.length >= 3 &&
+        text.split(RegExp(r'[^a-z0-9]+')).any((w) => w.startsWith(st));
+  }
+
+  bool _firmMatchesAny(String term) =>
+      store.cards.any((c) => _contains(_firmText(c), term));
+
+  /// Kart kelime süzgecinden geçiyor mu?
+  bool _cardOk(CompanyCard c) {
+    final t = _firmText(c);
+    return _incFirm.every((w) => _contains(t, w)) &&
+        !_excFirm.any((w) => _contains(t, w));
+  }
+
+  /// Proje türü süzgeci (sorulan türler + hariç tutulanlar).
+  bool _typeOk(String type, Set<String> types) =>
+      (types.isEmpty || types.contains(type)) && !_excTypes.contains(type);
+
   /// Metin + (varsa) tasarlanmış rapor.
   AssistantReply reply(String raw) {
     _report = null;
@@ -91,7 +248,7 @@ class RackAssistant {
       return 'Sohbet, Projeler askılığındaki işleri listeliyor ve şu an o askılık yok.\n\n'
           'Proje takibi yapmak istersen: Askılık → + Yeni → "Ekip projeleri".';
     }
-    final q = _norm(raw);
+    final q = _parseFilters(_norm(raw));
     final types = _typesIn(q);
     final member = _memberIn(q);
 
@@ -99,9 +256,11 @@ class RackAssistant {
     final asksLeft = _has(q, ['kalan', 'kaldi', 'ne kaldi', 'hangi proje', 'eksik', 'bitmeyen', 'yapilacak', 'cizilecek', 'bekleyen']);
 
     // firma adı geçiyorsa ("Örnek Tekstil'in elektriği kaldı mı") → o firmanın kartı
-    for (final c in store.cards) {
-      final n = _norm(c.name).trim();
-      if (n.isNotEmpty && q.contains(n)) return _cardDetail(c);
+    if (!_hasFilter) {
+      for (final c in store.cards) {
+        final n = _norm(c.name).trim();
+        if (n.isNotEmpty && q.contains(n)) return _cardDetail(c);
+      }
     }
 
     if (asksLeft) return _remaining(types: types, member: member);
@@ -111,6 +270,8 @@ class RackAssistant {
     if (asksDone) return _completed();
     // sadece tür ya da kişi yazıldıysa ("elektrik?", "arkadaşımda ne var") → kalanlar
     if (types.isNotEmpty) return _remaining(types: types, member: member);
+    // sadece kelime süzgeci ("tekstil geçenleri listele") → kalanlar
+    if (_hasFilter) return _remaining(member: member);
     if (_has(q, ['ozet', 'durum', 'genel', 'nasil gidiyor'])) {
       return _summary();
     }
@@ -147,16 +308,20 @@ class RackAssistant {
     var total = 0;
     for (final c in store.active) {
       if (member != null && c.assignedTo != member) continue;
-      final rem = c.remaining
-          .where((e) => types.isEmpty || types.contains(e.type))
-          .toList();
+      if (!_cardOk(c)) continue;
+      final rem = c.remaining.where((e) => _typeOk(e.type, types)).toList();
       if (rem.isEmpty) continue;
+      // aynı süzgeçteki biten projeler de raporda yeşil görünsün
+      final fin = c.items.where((e) => e.done && _typeOk(e.type, types)).toList();
       total += rem.length;
       final owner = store.memberById(c.assignedTo);
       // tek tür sorulduysa tür adını tekrar yazmaya gerek yok
-      final detail = types.length == 1
-          ? ''
-          : ': ${rem.map((e) => kShortNames[e.type] ?? e.type).join(', ')}';
+      final detail = (types.length == 1
+              ? ''
+              : ': ${rem.map((e) => kShortNames[e.type] ?? e.type).join(', ')}') +
+          (fin.isEmpty
+              ? ''
+              : ' (bitti: ${fin.map((e) => kShortNames[e.type] ?? e.type).join(', ')})');
       final ownerTxt = (owner != null && member == null) ? ' (${owner.name})' : '';
       rows.add('${rows.length + 1}. ${c.name}$ownerTxt$detail');
       reportRows.add(ReportRow(
@@ -164,6 +329,7 @@ class RackAssistant {
         owner: owner?.name,
         ownerColor: owner?.color,
         items: rem.map((e) => kShortNames[e.type] ?? e.type).toList(),
+        doneItems: fin.map((e) => kShortNames[e.type] ?? e.type).toList(),
         done: c.items.where((e) => e.done).length,
         total: c.items.length,
       ));
@@ -171,17 +337,20 @@ class RackAssistant {
 
     final what = types.isEmpty ? 'proje' : '${_typesLabel(types)} projesi';
     final whose = who != null ? '${who.name} için ' : '';
+    final fl = _filterLabels.isEmpty ? '' : ' (${_filterLabels.join(', ')})';
     if (rows.isEmpty) {
+      if (_hasFilter) return 'Bu süzgece uyan kalan $what yok$fl.';
       return types.isEmpty && who == null
           ? 'İpte kalan iş yok, her şey tamam! 🎉'
           : _cap('$whose$what kalmadı 🎉');
     }
-    final head = types.isEmpty && who == null
+    final head = types.isEmpty && who == null && !_hasFilter
         ? 'Öncelik sırana göre kalanlar:'
-        : _cap('$whose$what kalan firmalar (öncelik sırasıyla):');
+        : _cap('$whose$what kalan firmalar$fl (öncelik sırasıyla):');
     final filters = [
       if (types.isNotEmpty) _typesLabel(types),
       if (who != null) who.name,
+      ..._filterLabels,
     ];
     _report = Report(
       title: types.isEmpty ? 'Kalan Projeler' : 'Kalan ${_typesLabel(types)} Projeleri',
@@ -201,10 +370,11 @@ class RackAssistant {
     final reportRows = <ReportRow>[];
     var count = 0;
     for (final c in store.cards) {
+      if (!_cardOk(c)) continue;
       final done = c.items
           .where((e) =>
               e.done &&
-              (types.isEmpty || types.contains(e.type)) &&
+              _typeOk(e.type, types) &&
               (member == null || e.doneBy == member))
           .toList();
       if (done.isEmpty) continue;
@@ -229,7 +399,10 @@ class RackAssistant {
     if (rows.isEmpty) return 'Henüz ${whose}çizilmiş $what yok.';
     _report = Report(
       title: types.isEmpty ? 'Çizilen Projeler' : 'Çizilen ${_typesLabel(types)} Projeleri',
-      subtitle: who != null ? '${who.name} tarafından' : 'Tüm firmalar',
+      subtitle: [
+        who != null ? '${who.name} tarafından' : 'Tüm firmalar',
+        ..._filterLabels,
+      ].join(' · '),
       summary: '${rows.length} firma · $count proje çizildi',
       rows: reportRows,
       style: ReportStyle.done,
@@ -238,11 +411,15 @@ class RackAssistant {
   }
 
   String _completed() {
-    final done = store.completed;
-    if (done.isEmpty) return 'Henüz tamamlanan firma yok.';
+    final done = store.completed.where(_cardOk).toList();
+    if (done.isEmpty) {
+      return _hasFilter
+          ? 'Bu süzgece uyan tamamlanan firma yok.'
+          : 'Henüz tamamlanan firma yok.';
+    }
     _report = Report(
       title: 'Tamamlanan Firmalar',
-      subtitle: 'Tüm projeleri bitenler',
+      subtitle: ['Tüm projeleri bitenler', ..._filterLabels].join(' · '),
       summary: '${done.length} firma tamamlandı',
       style: ReportStyle.done,
       rows: [
@@ -332,6 +509,8 @@ class RackAssistant {
       '• Arkadaşımın mimari projeleri kaldı mı?\n'
       '• Hangi firmaların algılaması bitti?\n'
       '• Neler tamamlandı? · Durum ne? · Kimde ne var?\n'
+      '• Adında "tekstil" geçenleri listele\n'
+      '• "Mavi" hariç kalanlar · Elektrik hariç kalanlar\n'
       '• Firma adı yaz, detayını vereyim.';
 
   static String _cap(String s) =>

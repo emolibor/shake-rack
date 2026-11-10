@@ -140,8 +140,6 @@ class _Row extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final done = style == ReportStyle.done;
-    final chipBg = done ? const Color(0xFFE2F3E5) : const Color(0xFFFFEBDB);
-    final chipFg = done ? const Color(0xFF2E7D32) : const Color(0xFFA0521D);
     final progress = row.total == 0 ? 0.0 : row.done / row.total;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 12, 18, 12),
@@ -208,26 +206,9 @@ class _Row extends StatelessWidget {
                   runSpacing: 5,
                   children: [
                     for (final it in row.items)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
-                        decoration: BoxDecoration(
-                          color: chipBg,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(done ? Icons.check : Icons.radio_button_unchecked,
-                                size: 11, color: chipFg),
-                            const SizedBox(width: 4),
-                            Text(it,
-                                style: TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w600,
-                                    color: chipFg)),
-                          ],
-                        ),
-                      ),
+                      _Chip(text: it, done: done),
+                    // kalanlar raporunda bitenler de görünsün (yeşil + tik)
+                    for (final it in row.doneItems) _Chip(text: it, done: true),
                   ],
                 ),
                 if (row.total > 0) ...[
@@ -254,6 +235,48 @@ class _Row extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Proje etiketi: kalan → turuncu boş daire, biten → yeşil zemin + tik.
+class _Chip extends StatelessWidget {
+  final String text;
+  final bool done;
+  const _Chip({required this.text, required this.done});
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = done ? const Color(0xFFDDF1E0) : const Color(0xFFFFEBDB);
+    final fg = done ? const Color(0xFF2E7D32) : const Color(0xFFA0521D);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+        border: done ? Border.all(color: const Color(0xFF9FD3A6), width: 0.8) : null,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (done)
+            Container(
+              width: 12,
+              height: 12,
+              decoration: const BoxDecoration(
+                  color: Color(0xFF43A047), shape: BoxShape.circle),
+              child: const Icon(Icons.check, size: 9, color: Colors.white),
+            )
+          else
+            Icon(Icons.radio_button_unchecked, size: 11, color: fg),
+          const SizedBox(width: 4),
+          Text(text,
+              style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: fg)),
         ],
       ),
     );
