@@ -80,7 +80,16 @@ jobs:
           exit $code
 
       - name: Uygulama ikonu
-        run: dart run flutter_launcher_icons
+        run: |
+          # "flutter_launcher_icons-*.yaml" dosyaları "flavor" sanılır ve ana
+          # ikon üretilmez (Flutter logosu kalır) → böyle dosya olmasın
+          if ls flutter_launcher_icons-*.yaml >/dev/null 2>&1; then
+            echo "::error::flutter_launcher_icons-*.yaml uygulama ikonunu bozar"; exit 1
+          fi
+          dart run flutter_launcher_icons
+          # ikon gerçekten Shake Rack askısı mı? (Flutter varsayılanı değil)
+          test -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml || {
+            echo "::error::Uygulama ikonu üretilmedi"; exit 1; }
 
       - name: APK derle
         run: |

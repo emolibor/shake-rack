@@ -3,7 +3,7 @@ name: Web sürümü + davet sayfası (GitHub Pages)
 on:
   push:
     branches: [main]
-    paths: ['lib/**', 'site/**', 'assets/**', 'pubspec.yaml', 'flutter_launcher_icons-web.yaml', '.github/workflows/pages.yml']
+    paths: ['lib/**', 'site/**', 'assets/**', 'pubspec.yaml', 'tool/web_icons.yaml', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -39,7 +39,7 @@ jobs:
 
       - name: İkon ve başlık
         run: |
-          dart run flutter_launcher_icons -f flutter_launcher_icons-web.yaml
+          dart run flutter_launcher_icons -f tool/web_icons.yaml
           python3 - <<'PY'
           import json, re, pathlib
           idx = pathlib.Path('web/index.html')
