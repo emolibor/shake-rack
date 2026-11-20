@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:confetti/confetti.dart';
 import 'package:flutter/material.dart';
@@ -18,19 +19,63 @@ class RackScreen extends StatefulWidget {
   State<RackScreen> createState() => _RackScreenState();
 }
 
-class _RackScreenState extends State<RackScreen> {
+class _RackScreenState extends State<RackScreen> with WidgetsBindingObserver {
   late final ConfettiController _confetti;
+  Timer? _resetTimer;
 
   @override
   void initState() {
     super.initState();
     _confetti = ConfettiController(duration: const Duration(seconds: 2));
+    WidgetsBinding.instance.addObserver(this);
+    _scheduleReset();
   }
 
   @override
   void dispose() {
+    _resetTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _confetti.dispose();
     super.dispose();
+  }
+
+  /// Rutinler gece 02:00'de sıfırlanır: o anda ekranı yenile.
+  void _scheduleReset() {
+    _resetTimer?.cancel();
+    if (!widget.board.isRoutine) return;
+    final wait = Board.nextRoutineReset().difference(DateTime.now()) +
+        const Duration(seconds: 1);
+    _resetTimer = Timer(wait, () {
+      if (!mounted) return;
+      setState(() {});
+      _scheduleReset();
+    });
+  }
+
+  /// Uygulama arka plandan dönünce (gece 02:00 geçmiş olabilir) yenile.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && widget.board.isRoutine) {
+      setState(() {});
+      _scheduleReset();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant RackScreen old) {
+    super.didUpdateWidget(old);
+    if (old.board != widget.board) _scheduleReset();
+  }
+
+  /// Rutin: tik bugünlük, kart ipte kalır. Hepsi bitince konfeti.
+  void _onRoutineTick(CompanyCard card) {
+    final allDone = widget.board.toggleRoutine(card);
+    if (!allDone) return;
+    _confetti.play();
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(
+          content: Text('Bugünün rutinleri tamam 🎉 Gece 02:00\'de yenilenir.')));
   }
 
   Future<void> _onToggle(CompanyCard card, ProjectItem item) async {
@@ -102,8 +147,10 @@ class _RackScreenState extends State<RackScreen> {
                 minLines: 1,
                 maxLines: 6,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  hintText: 'Notunu yaz…',
+                decoration: InputDecoration(
+                  hintText: widget.board.isRoutine
+                      ? 'Rutinini yaz… (ör. Spor yap)'
+                      : 'Notunu yaz…',
                   border: InputBorder.none,
                 ),
               ),
@@ -185,9 +232,13 @@ class _RackScreenState extends State<RackScreen> {
                                 key: ValueKey(c.id),
                                 card: c,
                                 index: i,
-                                ticking: _ticking.contains(c.id),
+                                ticking: board.isRoutine
+                                    ? board.checkedToday(c)
+                                    : _ticking.contains(c.id),
                                 onOpen: () => _guard(() => _openEdit(c)),
-                                onToggle: () => _guard(() => _onNoteTick(c)),
+                                onToggle: () => _guard(() => board.isRoutine
+                                    ? _onRoutineTick(c)
+                                    : _onNoteTick(c)),
                               );
                             }
                             return RopeCard(
@@ -212,7 +263,11 @@ class _RackScreenState extends State<RackScreen> {
           child: FloatingActionButton.extended(
             onPressed: _add,
             icon: Icon(board.isNotes ? Icons.edit_note : Icons.add),
-            label: Text(board.isNotes ? 'Not yaz' : 'Kart as'),
+            label: Text(board.isRoutine
+                ? 'Rutin ekle'
+                : board.isNotes
+                    ? 'Not yaz'
+                    : 'Kart as'),
           ),
         ),
         Align(
@@ -247,7 +302,9 @@ class _Empty extends StatelessWidget {
             const SizedBox(height: 12),
             Text(board.isProjects
                 ? 'İp boş. İlk firmayı as!'
-                : board.isNotes
+                : board.isRoutine
+                    ? 'Günlük rutinlerini yaz (ör. Spor yap).\nTikler her gece 02:00\'de sıfırlanır.'
+                    : board.isNotes
                     ? '${board.name} ipi boş. İlk notunu yaz!'
                     : '${board.name} ipi boş. İlk kartı as!',
                 style: TextStyle(fontSize: 16, color: Colors.black54)),
@@ -255,7 +312,11 @@ class _Empty extends StatelessWidget {
             OutlinedButton.icon(
                 onPressed: onAdd,
                 icon: Icon(board.isNotes ? Icons.edit_note : Icons.add),
-                label: Text(board.isNotes ? 'Not yaz' : 'Kart as')),
+                label: Text(board.isRoutine
+                    ? 'Rutin ekle'
+                    : board.isNotes
+                        ? 'Not yaz'
+                        : 'Kart as')),
           ],
         ),
       );
@@ -413,6 +474,12 @@ class _StatusBand extends StatelessWidget {
     } else if (board.shareEnded && !board.isShared) {
       icon = Icons.link_off;
       text = 'Paylaşım sonlandırıldı · bu artık senin kopyan';
+    } else if (board.isRoutine && !board.isShared) {
+      final (d, t) = board.routineProgress();
+      icon = Icons.event_repeat;
+      text = t == 0
+          ? 'Rutinler · her gece 02:00\'de sıfırlanır'
+          : 'Bugün $d/$t yapıldı · 02:00\'de sıfırlanır';
     } else if (!board.isShared) {
       icon = Icons.lock_outline;
       text = 'Özel askılık · sadece bu telefonda';

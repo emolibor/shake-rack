@@ -106,6 +106,10 @@ class CompanyCard {
   bool deleted;
   DateTime? deletedAt;
 
+  /// Rutin askılığında son tik zamanı. Tik "bugün" sayılır, gece 02:00'de
+  /// kendiliğinden düşer (veri silinmez, sadece gün değişir).
+  DateTime? checkedAt;
+
   CompanyCard({
     required this.id,
     required this.name,
@@ -117,6 +121,7 @@ class CompanyCard {
     this.completedAt,
     this.deleted = false,
     this.deletedAt,
+    this.checkedAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
   List<ProjectItem> get remaining => items.where((i) => !i.done).toList();
@@ -133,6 +138,7 @@ class CompanyCard {
         'completedAt': completedAt?.toIso8601String(),
         if (deleted) 'deleted': true,
         if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
+        if (checkedAt != null) 'checkedAt': checkedAt!.toIso8601String(),
       };
   factory CompanyCard.fromJson(Map<String, dynamic> j) => CompanyCard(
         id: j['id'],
@@ -146,6 +152,7 @@ class CompanyCard {
             j['completedAt'] != null ? DateTime.parse(j['completedAt']) : null,
         deleted: j['deleted'] ?? false,
         deletedAt: j['deletedAt'] != null ? DateTime.parse(j['deletedAt']) : null,
+        checkedAt: j['checkedAt'] != null ? DateTime.tryParse(j['checkedAt']) : null,
       );
 }
 

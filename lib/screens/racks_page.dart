@@ -141,8 +141,9 @@ class _HangerTabs extends StatelessWidget {
                       selected: boards[i].id == selectedId,
                       locked: boards[i].isPrivate,
                       shared: boards[i].isShared,
-                      count: boards[i].active.length,
+                      count: boards[i].badgeCount,
                       notes: boards[i].isNotes,
+                      routine: boards[i].isRoutine,
                       onTap: () => onSelect(boards[i]),
                     ),
                   ),
@@ -167,6 +168,7 @@ class _HangerTabs extends StatelessWidget {
     bool shared = false,
     bool add = false,
     bool notes = false,
+    bool routine = false,
     int count = 0,
   }) {
     final fg = selected ? Colors.white : _brown;
@@ -194,7 +196,9 @@ class _HangerTabs extends StatelessWidget {
                 children: [
                   add
                       ? Icon(Icons.add, size: 22, color: fg)
-                      : notes
+                      : routine
+                          ? Icon(Icons.event_repeat, size: 22, color: fg)
+                          : notes
                           ? Icon(Icons.sticky_note_2_outlined, size: 22, color: fg)
                           : HangerLogo(size: 24, color: fg),
                   const SizedBox(height: 2),

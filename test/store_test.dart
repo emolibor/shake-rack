@@ -634,4 +634,66 @@ void main() {
     expect(params['n'], 'Ekip İşleri');
     expect(params['o'], 'Emirhan');
   });
+
+  group('Rutinler (her gece 02:00 sıfırlanır)', () {
+    test('gün sınırı 02:00', () {
+      expect(Board.routineDayStart(DateTime(2026, 11, 20, 15, 0)),
+          DateTime(2026, 11, 20, 2));
+      expect(Board.routineDayStart(DateTime(2026, 11, 20, 1, 59)),
+          DateTime(2026, 11, 19, 2));
+      expect(Board.routineDayStart(DateTime(2026, 12, 1, 0, 30)),
+          DateTime(2026, 11, 30, 2));
+      expect(Board.nextRoutineReset(DateTime(2026, 11, 20, 23, 0)),
+          DateTime(2026, 11, 21, 2));
+      expect(Board.nextRoutineReset(DateTime(2026, 11, 20, 1, 0)),
+          DateTime(2026, 11, 20, 2));
+    });
+
+    test('tik bugünlük; 02:00 sonra sıfır, kart ipte kalır', () {
+      final store = RackStore();
+      final r = store.addBoard('Rutinler', const [], kind: BoardKind.routines);
+      expect(r.isRoutine, isTrue);
+      expect(r.isNotes, isTrue); // not gibi serbest yazı
+      expect(r.template, isEmpty);
+      final spor = r.addCard('Spor yap', const []);
+      r.addCard('Kitap oku', const []);
+
+      final gece = DateTime(2026, 11, 20, 23, 30);
+      expect(r.toggleRoutine(spor, gece), isFalse); // hepsi bitmedi
+      expect(r.checkedToday(spor, gece), isTrue);
+      expect(r.routineProgress(gece), (1, 2));
+      // gece 1:30 hâlâ aynı gün
+      expect(r.checkedToday(spor, DateTime(2026, 11, 21, 1, 30)), isTrue);
+      // 02:00 olunca sıfır
+      expect(r.checkedToday(spor, DateTime(2026, 11, 21, 2, 0)), isFalse);
+      expect(r.routineProgress(DateTime(2026, 11, 21, 9)), (0, 2));
+      // kartlar tamamlananlara gitmez
+      expect(r.active.length, 2);
+      expect(r.completed, isEmpty);
+    });
+
+    test('hepsi bitince true; tik geri alınabilir', () {
+      final store = RackStore();
+      final r = store.addBoard('Rutinler', const [], kind: BoardKind.routines);
+      final a = r.addCard('Spor', const []);
+      final b = r.addCard('Su iç', const []);
+      final now = DateTime(2026, 11, 20, 10);
+      r.toggleRoutine(a, now);
+      expect(r.toggleRoutine(b, now), isTrue);
+      r.toggleRoutine(b, now); // geri al
+      expect(r.checkedToday(b, now), isFalse);
+      expect(r.routineProgress(now), (1, 2));
+    });
+
+    test('kaydedip yükleyince tür ve tik korunur', () {
+      final store = RackStore();
+      final r = store.addBoard('Rutinler', const [], kind: BoardKind.routines);
+      final c = r.addCard('Spor', const []);
+      r.toggleRoutine(c);
+      final copy = Board.fromJson(jsonDecode(jsonEncode(r.toJson())));
+      expect(copy.kind, BoardKind.routines);
+      expect(copy.checkedToday(copy.cards.single), isTrue);
+      expect(Board.fromShare(r.sharePayload()).kind, BoardKind.routines);
+    });
+  });
 }

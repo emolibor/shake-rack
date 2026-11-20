@@ -45,7 +45,7 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
 
   bool get _isNew => widget.board == null;
   bool get _isProjects => widget.board?.isProjects ?? false;
-  bool get _isNotes => _kind == BoardKind.notes;
+  bool get _isNotes => _kind != BoardKind.items;
 
   List<String> get _ideas => _isProjects
       ? kProjectTypes
@@ -248,18 +248,32 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
                 ButtonSegment(
                     value: BoardKind.items,
                     icon: Icon(Icons.checklist),
-                    label: Text('Maddeli kartlar')),
+                    label: Text('Maddeli')),
                 ButtonSegment(
                     value: BoardKind.notes,
                     icon: Icon(Icons.sticky_note_2_outlined),
-                    label: Text('Sadece notlar')),
+                    label: Text('Notlar')),
+                ButtonSegment(
+                    value: BoardKind.routines,
+                    icon: Icon(Icons.event_repeat),
+                    label: Text('Rutinler')),
               ],
+              showSelectedIcon: false,
               selected: {_kind},
-              onSelectionChanged: (s) => setState(() => _kind = s.first),
+              onSelectionChanged: (s) => setState(() {
+                _kind = s.first;
+                // rutin seçilince adı hazır gelsin
+                if (_kind == BoardKind.routines && _name.text.trim().isEmpty) {
+                  _name.text = 'Rutinler';
+                }
+              }),
             ),
             const SizedBox(height: 6),
             Text(
-              _isNotes
+              _kind == BoardKind.routines
+                  ? 'Günlük rutinler: serbestçe yaz, yaptıkça tik at. '
+                      'Tikler her gece 02:00\'de sıfırlanır, rutinler ipte kalır.'
+                  : _isNotes
                   ? 'Başlık ya da madde yok: yazını yaz, ipe as, üzerine tik at.'
                   : 'Her kartın altında tiklenecek maddeler olur (ör. Instagram, YouTube).',
               style: const TextStyle(fontSize: 12, color: Colors.black54),
@@ -271,7 +285,13 @@ class _BoardEditScreenState extends State<BoardEditScreen> {
               textCapitalization: TextCapitalization.sentences,
               decoration: InputDecoration(
                 labelText: 'Askılık adı',
-                hintText: _isProjects ? 'Projeler' : _isNotes ? 'Notlar' : 'Reels',
+                hintText: _isProjects
+                    ? 'Projeler'
+                    : _kind == BoardKind.routines
+                        ? 'Rutinler'
+                        : _isNotes
+                            ? 'Notlar'
+                            : 'Reels',
                 border: const OutlineInputBorder(),
               ),
             ),

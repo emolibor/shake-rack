@@ -9,7 +9,11 @@ import 'store.dart';
 /// - Özel askılıklar: adı ve şablonu kullanıcı belirler (ör. Reels →
 ///   Instagram, YouTube). SADECE bu telefonda saklanır, buluta gitmez.
 /// Askılık türü: maddeli kartlar ya da sadece yazıdan ibaret notlar.
-enum BoardKind { items, notes }
+/// routines: not gibi serbest yazı, tikler her gece 02:00'de sıfırlanır.
+enum BoardKind { items, notes, routines }
+
+BoardKind _kindOf(Object? s) => BoardKind.values
+    .firstWhere((k) => k.name == s, orElse: () => BoardKind.items);
 
 /// Paylaşılan askılıkta bu telefonun rolü.
 /// owner: paylaşan · editor: düzenleyebilir · viewer: sadece inceler
@@ -90,12 +94,64 @@ class Board {
         name: name.trim(),
         isProjects: false,
         kind: kind,
-        template: kind == BoardKind.notes ? [] : template,
+        template: kind == BoardKind.items ? template : [],
       );
 
   /// Grupla paylaşılmayan, kimseyle paylaşılmamış askılık.
   bool get isPrivate => !isProjects && !isShared;
-  bool get isNotes => kind == BoardKind.notes;
+  /// Yazı kartları (not ve rutin): başlık/madde yok, sadece yazı + tik.
+  bool get isNotes => kind == BoardKind.notes || kind == BoardKind.routines;
+  bool get isRoutine => kind == BoardKind.routines;
+
+  // ---------- rutinler ----------
+  /// Rutin gününün sıfırlandığı saat.
+  static const resetHour = 2;
+
+  /// Şu anki rutin gününün başlangıcı: bugün 02:00, saat 02:00'den önceyse dün 02:00.
+  static DateTime routineDayStart([DateTime? now]) {
+    final n = now ?? DateTime.now();
+    final today = DateTime(n.year, n.month, n.day, resetHour);
+    return n.isBefore(today)
+        ? DateTime(n.year, n.month, n.day - 1, resetHour)
+        : today;
+  }
+
+  /// Bir sonraki sıfırlama anı.
+  static DateTime nextRoutineReset([DateTime? now]) {
+    final s = routineDayStart(now);
+    return DateTime(s.year, s.month, s.day + 1, resetHour);
+  }
+
+  /// Rutin bugün yapıldı mı?
+  bool checkedToday(CompanyCard c, [DateTime? now]) {
+    final at = c.checkedAt;
+    if (at == null) return false;
+    final start = routineDayStart(now);
+    return !at.isBefore(start) && at.isBefore(nextRoutineReset(now));
+  }
+
+  /// Bugün yapılan / toplam rutin.
+  (int, int) routineProgress([DateTime? now]) {
+    final l = live;
+    return (l.where((c) => checkedToday(c, now)).length, l.length);
+  }
+
+  /// Sekmedeki sayı: rutinde bugün kalanlar, diğerlerinde ipteki kartlar.
+  int get badgeCount {
+    if (!isRoutine) return active.length;
+    final (d, t) = routineProgress();
+    return t - d;
+  }
+
+  /// Rutine tik at / kaldır. Bugünün hepsi bittiyse true (konfeti için).
+  bool toggleRoutine(CompanyCard card, [DateTime? now]) {
+    final on = !checkedToday(card, now);
+    card.checkedAt = on ? (now ?? DateTime.now()) : null;
+    _log(on ? 'tick' : 'untick', card, 'bugün');
+    _commit();
+    final (d, t) = routineProgress(now);
+    return on && t > 0 && d == t;
+  }
 
   /// Kart başlığı etiketi: projelerde firma, özelde serbest başlık.
   String get cardTitleLabel => isProjects ? 'Firma adı' : 'Başlık';
@@ -301,7 +357,7 @@ class Board {
         id: _uuid.v4(),
         name: (d['name'] as String?) ?? 'Paylaşılan askılık',
         isProjects: false,
-        kind: d['kind'] == 'notes' ? BoardKind.notes : BoardKind.items,
+        kind: _kindOf(d['kind']),
         template: List<String>.from(d['template'] ?? const []),
         cards: (d['cards'] as List? ?? [])
             .map((e) => CompanyCard.fromJson(Map<String, dynamic>.from(e)))
@@ -313,7 +369,7 @@ class Board {
         name: j['name'],
         isProjects: false,
         template: List<String>.from(j['template'] ?? const []),
-        kind: j['kind'] == 'notes' ? BoardKind.notes : BoardKind.items,
+        kind: _kindOf(j['kind']),
         cards: (j['cards'] as List? ?? [])
             .map((e) => CompanyCard.fromJson(Map<String, dynamic>.from(e)))
             .toList(),

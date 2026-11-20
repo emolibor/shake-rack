@@ -237,7 +237,7 @@ Future<void> showFriendSheet(BuildContext context, RackStore store, Member frien
                     color: const Color(0xFFFFF8E7),
                     child: ListTile(
                       dense: true,
-                      leading: Icon(b.isNotes ? Icons.sticky_note_2_outlined : Icons.checkroom),
+                      leading: Icon(b.isRoutine ? Icons.event_repeat : b.isNotes ? Icons.sticky_note_2_outlined : Icons.checkroom),
                       title: Text(b.name),
                       subtitle: Text(_roleText(b, f.id)),
                       trailing: Text('${b.active.length} açık',
